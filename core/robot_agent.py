@@ -138,6 +138,10 @@ class RobotAgent:
         reserved = self.book.as_reserved_table() if self.cooperative else None
         
         for task_id, task in list(self.known_tasks.items()):
+            # Only bid once per task to prevent shifting bids as busy robots move!
+            if task_id in self.open_bids and self.robot_id in self.open_bids[task_id]:
+                continue
+                
             if self.state == "IDLE":
                 # 1. Compute true space-time cost to pickup
                 path_to_pickup = astar(self.wmap, self.pos, task.pickup, reserved, start_t=self.t, self_id=self.robot_id)
@@ -161,6 +165,11 @@ class RobotAgent:
                     ticks_to_finish = manhattan(self.pos, self.current_task.pickup) + manhattan(self.current_task.pickup, self.current_task.dropoff)
                 else:
                     ticks_to_finish = manhattan(self.pos, self.current_task.dropoff)
+                
+                # A busy robot continues moving towards its goal during the 3-tick auction,
+                # whereas an IDLE robot sits completely still waiting for the auction to settle.
+                # We subtract those ticks to accurately compare their true arrival times!
+                ticks_to_finish = max(0, ticks_to_finish - AUCTION_WINDOW_TICKS)
                     
                 future_pos = self.current_task.dropoff
                 
