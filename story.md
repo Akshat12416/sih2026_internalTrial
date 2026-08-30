@@ -57,7 +57,7 @@ There were two issues here:
 
 **The Solution:**
 - We increased the `STARVATION_WAIT_LIMIT` to 10 ticks, giving `IDLE` robots enough time to physically step out of the way before the active robot decides to detour.
-- We implemented **Honk Ignoring**. When an `IDLE` robot is nudged, it finds a staging cell, generates an escape path, and enters a `MAKING WAY` state. While in this state, it strictly ignores any further nudges from impatient peers, allowing it to smoothly clear the aisle.
+- We implemented **Honk Ignoring**. When an `IDLE` robot is nudged, it runs an A* search to find the nearest staging cell, generates a multi-step escape path, and enters a `MAKING WAY` state. While in this state, it is smart enough to completely ignore any further nudges from the impatient blocked peer. It does not stop to recalculate; it just focuses on finishing its escape steps, allowing it to smoothly clear the aisle.
 
 ---
 
