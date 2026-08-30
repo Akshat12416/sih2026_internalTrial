@@ -81,6 +81,7 @@ class RobotAgent:
     _interrupted_state: Optional[str] = field(default=None, repr=False)
     avoid_until: Dict[Cell, int] = field(default_factory=dict, repr=False)
     nudged: bool = False
+    display_status: str = ""
 
     def __post_init__(self):
         self.book = ReservationBook(self.robot_id)
@@ -237,6 +238,7 @@ class RobotAgent:
         # avoid future congestion -- only react once literally blocked.
         reserved = self.book.as_reserved_table() if self.cooperative else None
         if self.cooperative and self.avoid_until:
+            self.display_status = "RECALCULATING"
             reserved = dict(reserved) if reserved else {}
             for cell, expiry in self.avoid_until.items():
                 if expiry > self.t and cell != goal:  # never blacklist the goal itself
@@ -249,6 +251,9 @@ class RobotAgent:
         """Advance simulation/reality by one tick. Call order matters:
         1) battery/state transitions  2) plan if needed  3) broadcast intent
         4) resolve local conflicts    5) move (or yield)."""
+        if self.display_status in ("RECALCULATING", "YIELDING"):
+            self.display_status = ""
+        
         self.t += 1
         self.book.prune(now=time.time())
         if self.avoid_until:
@@ -305,6 +310,7 @@ class RobotAgent:
                     self.avoid_until[self.pos] = self.t + 10
                     self.path = []
                     self.nudged = False
+                    self.display_status = "YIELDING"
                     
                 just_planned_idle = False
                 if not self.path or len(self.path) < 2:
@@ -376,10 +382,12 @@ class RobotAgent:
                 self.path = self.path[1:]
                 self.battery = max(0.0, self.battery - BATTERY_DRAIN_PER_MOVE)
                 self.wait_ticks = 0
+                self.display_status = ""
                 moved = True
             else:
                 self.wait_ticks += 1
                 self.total_wait_ticks += 1
+                self.display_status = "WAITING"
                 moved = False
                 
                 # NUDGE PROTOCOL: If we are blocked by a peer sitting directly on next_cell, ask them to move!
@@ -392,6 +400,7 @@ class RobotAgent:
                             break
                     if blocker:
                         self.send({"type": "nudge", "target": blocker, "from": self.robot_id})
+                        self.display_status = "REQUESTING YIELD"
                 
                 if self.cooperative and self.wait_ticks > STARVATION_WAIT_LIMIT:
                     # break the deadlock: force a fresh plan (often finds a
