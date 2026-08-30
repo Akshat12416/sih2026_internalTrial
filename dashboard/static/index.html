@@ -430,10 +430,10 @@ function renderAuctions() {
         sortedBids.forEach(([rid, bidData]) => {
             const isWinner = auc.winner === rid;
             const rowStyle = isWinner ? 'color: #ff8fd6; font-weight: bold;' : 'color: #ffcf6b;';
-            const details = bidData.details || {distance: bidData.cost, battery_penalty: 0};
+            const details = bidData.details || {dist_to_pickup: bidData.cost, dist_to_dropoff: 0, battery_penalty: 0};
             bodyHtml += `<div style="display:flex; margin-bottom:6px; ${rowStyle}">
                 <span style="flex:1">[${rid}]</span>
-                <span style="flex:2; opacity:0.8;">Dist(${Math.floor(details.distance)}) + BattPenalty(${details.battery_penalty})</span>
+                <span style="flex:3; opacity:0.8; font-size:11px;">Path2Pickup(${Math.floor(details.dist_to_pickup)}) + Path2Dropoff(${Math.floor(details.dist_to_dropoff)}) + BattPenalty(${details.battery_penalty})</span>
                 <span style="flex:1; text-align:right;">${Math.floor(bidData.cost)}</span>
             </div>`;
         });

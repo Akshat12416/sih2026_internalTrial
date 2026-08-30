@@ -126,14 +126,29 @@ class RobotAgent:
     def bid_on_open_tasks(self):
         if self.state != "IDLE" or self.battery < LOW_BATTERY:
             return
+            
+        reserved = self.book.as_reserved_table() if self.cooperative else None
+        
         for task_id, task in list(self.known_tasks.items()):
-            dist = manhattan(self.pos, task.pickup)
+            # 1. Compute true space-time cost to pickup
+            path_to_pickup = astar(self.wmap, self.pos, task.pickup, reserved, start_t=self.t, self_id=self.robot_id)
+            if not path_to_pickup:
+                continue  # Literally cannot reach pickup right now, don't bid!
+            dist_to_pickup = len(path_to_pickup) - 1
+            
+            # 2. Compute true space-time cost from pickup to dropoff
+            # Project time into the future!
+            t_at_pickup = self.t + dist_to_pickup
+            path_to_dropoff = astar(self.wmap, task.pickup, task.dropoff, reserved, start_t=t_at_pickup, self_id=self.robot_id)
+            dist_to_dropoff = len(path_to_dropoff) - 1 if path_to_dropoff else manhattan(task.pickup, task.dropoff)
+            
+            # 3. Add battery penalty
             batt_penalty = int((100.0 - self.battery) * 0.2)  # +1 cost for every 5% battery missing
-            cost = dist + batt_penalty
+            cost = dist_to_pickup + dist_to_dropoff + batt_penalty
             
             bid_msg = {"type": "bid", "task_id": task_id,
                         "robot_id": self.robot_id, "cost": cost,
-                        "details": {"distance": dist, "battery_penalty": batt_penalty}}
+                        "details": {"dist_to_pickup": dist_to_pickup, "dist_to_dropoff": dist_to_dropoff, "battery_penalty": batt_penalty}}
             self.send(bid_msg)
             # loop back to ourselves too -- the network layer correctly
             # never delivers our own broadcasts back to us (it's not our
