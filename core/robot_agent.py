@@ -80,6 +80,7 @@ class RobotAgent:
     total_wait_ticks: int = 0
     _interrupted_state: Optional[str] = field(default=None, repr=False)
     avoid_until: Dict[Cell, int] = field(default_factory=dict, repr=False)
+    nudged: bool = False
 
     def __post_init__(self):
         self.book = ReservationBook(self.robot_id)
@@ -114,6 +115,9 @@ class RobotAgent:
             # clear all known open tasks from the network
             self.known_tasks.clear()
             self.open_bids.clear()
+        elif kind == "nudge":
+            if msg.get("target") == self.robot_id and self.state == "IDLE":
+                self.nudged = True
 
     # ---------------------------------------------------------------- #
     # TASK ALLOCATION -- decentralized Contract Net Protocol
@@ -204,10 +208,12 @@ class RobotAgent:
         need, exactly like a loading bay in a real warehouse."""
         seen = {self.pos}
         q = deque([self.pos])
+        occupied_cells = {intent.path[0] for intent in self.book.peers.values() if intent.path}
+        
         while q:
             cur = q.popleft()
             r, c = cur
-            if cur != self.pos and self.wmap.grid[r][c] == FREE:
+            if cur != self.pos and self.wmap.grid[r][c] == FREE and cur not in occupied_cells:
                 return cur
             for n in self.wmap.neighbours(cur):
                 if n not in seen:
@@ -288,7 +294,12 @@ class RobotAgent:
             # Step off a pickup/dropoff/charge cell instead of camping on
             # it -- otherwise a second robot arriving at the same shared
             # resource would have nowhere to physically go.
-            if self._on_resource_cell():
+            if self._on_resource_cell() or self.nudged or (self.path and len(self.path) >= 2):
+                if self.nudged:
+                    self.avoid_until[self.pos] = self.t + 10
+                    self.path = []
+                    self.nudged = False
+                    
                 just_planned_idle = False
                 if not self.path or len(self.path) < 2:
                     target = self._nearest_staging_cell()
@@ -364,6 +375,18 @@ class RobotAgent:
                 self.wait_ticks += 1
                 self.total_wait_ticks += 1
                 moved = False
+                
+                # NUDGE PROTOCOL: If we are blocked by a peer sitting directly on next_cell, ask them to move!
+                # We send the nudge every 2 ticks to ensure it gets through but doesn't spam.
+                if self.cooperative and self.wait_ticks % 2 == 1:
+                    blocker = None
+                    for peer_id, intent in self.book.peers.items():
+                        if intent.path and intent.path[0] == next_cell:
+                            blocker = peer_id
+                            break
+                    if blocker:
+                        self.send({"type": "nudge", "target": blocker, "from": self.robot_id})
+                
                 if self.cooperative and self.wait_ticks > STARVATION_WAIT_LIMIT:
                     # break the deadlock: force a fresh plan (often finds a
                     # side-step around the blocking robot instead of just waiting)
