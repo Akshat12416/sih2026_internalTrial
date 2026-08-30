@@ -110,6 +110,10 @@ class RobotAgent:
             self.wmap.report_blockage(tuple(msg["cell"]), msg.get("duration", 20.0))
             if self.path and tuple(msg["cell"]) in self.path:
                 self.path = []  # force replan
+        elif kind == "clear_tasks":
+            # clear all known open tasks from the network
+            self.known_tasks.clear()
+            self.open_bids.clear()
 
     # ---------------------------------------------------------------- #
     # TASK ALLOCATION -- decentralized Contract Net Protocol

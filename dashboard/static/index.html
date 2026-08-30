@@ -353,11 +353,13 @@ function updateQueueUI() {
     }
 }
 
-document.getElementById('btn-clear').onclick = () => {
+document.getElementById('btn-clear').onclick = async () => {
     taskQueue = [];
     currentPickup = null;
     clickState = 'SELECT_PICKUP';
     updateQueueUI();
+    // also tell the mesh to wipe all unassigned tasks!
+    await fetch('/api/clear-tasks', { method: 'POST' });
 };
 
 document.getElementById('btn-batch').onclick = async () => {
