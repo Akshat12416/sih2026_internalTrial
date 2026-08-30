@@ -86,7 +86,9 @@ def udp_listener(port: int):
 
 
 async def broadcast_state():
-    payload = json.dumps({"robots": list(fleet_state.values())})
+    robots = [v for k, v in fleet_state.items() if k != "_events"]
+    events = fleet_state.get("_events", [])
+    payload = json.dumps({"robots": robots, "events": events})
     dead = []
     for ws in connections:
         try:
