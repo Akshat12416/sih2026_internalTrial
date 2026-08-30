@@ -135,3 +135,18 @@ Because the busy robot was actively making progress during the auction, its bid 
 
 **The Solution:**
 We applied an **Auction Window Discount**. When a busy robot calculates its predictive `ticks_to_finish`, we automatically subtract `AUCTION_WINDOW_TICKS` (3) from its cost. This perfectly aligns their bid with their true arrival time, giving them credit for the momentum they carry through the auction window.
+---
+
+## 6. The Head-to-Head Active Deadlock & Goal Yielding
+
+**The Scenario:**
+A situation arose during high traffic where multiple robots ended up nose-to-nose in a single-width aisle at the pickup station. Robot 3 (R3) had just picked up a task and was trying to leave the row. However, Robot 1 (R1) and Robot 5 (R5) were empty and aggressively trying to enter the exact same row to pick up new tasks. They collided in a 1-wide aisle, with R3 completely boxed in.
+
+**The Problem:**
+Our system had a dynamic starvation limit which forces a blocked robot to eventually blacklist the cell in front of it and calculate a detour. However, we had a safety check that prevented a robot from *ever* blacklisting its final goal cell (because doing so would make the pathfinder fail).
+Because the cell they were fighting over was the actual pickup goal for R1 and R5, they refused to blacklist it. Instead, they would reset their timers, recalculate the exact same path to their goal, realize it was still occupied by R3, and start waiting again. This created a permanent infinite loop where nobody would back down!
+
+**The Solution:**
+- We removed the rule preventing a robot from blacklisting its own goal. If a goal is hopelessly blocked, it *should* be blacklisted.
+- We implemented **Goal Yielding**: if a robot's pathfinder fails (which now happens if its goal is blacklisted), it temporarily gives up on its mission, finds the nearest `FREE` staging area, and drives there to wait it out. 
+- Now, when R1 realizes it can't reach the pickup station because R3 is blocking it, R1 gracefully reverses out of the aisle, "circles the block" by waiting at a staging cell, and allows R3 to leave before trying again!

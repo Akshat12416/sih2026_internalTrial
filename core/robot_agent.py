@@ -277,11 +277,21 @@ class RobotAgent:
             self.display_status = "RECALCULATING"
             reserved = dict(reserved) if reserved else {}
             for cell, expiry in self.avoid_until.items():
-                if expiry > self.t and cell != goal:  # never blacklist the goal itself
+                if expiry > self.t:
                     for dt in range(400):
                         reserved.setdefault((cell, self.t + dt), self.robot_id + "#avoid")
         self.path = astar(self.wmap, self.pos, goal, reserved,
                             start_t=self.t, self_id=self.robot_id)
+        
+        # If we couldn't find a path to our goal (e.g. because the goal itself 
+        # is blacklisted or blocked), we should temporarily retreat to a staging cell!
+        if not self.path and self.cooperative:
+            target = self._nearest_staging_cell()
+            if target:
+                self.path = astar(self.wmap, self.pos, target, reserved,
+                                  start_t=self.t, self_id=self.robot_id)
+                if self.path:
+                    self.display_status = "RECALCULATING"
 
     def step(self):
         """Advance simulation/reality by one tick. Call order matters:
