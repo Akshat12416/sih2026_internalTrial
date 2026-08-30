@@ -19,9 +19,9 @@ def demo_warehouse() -> WarehouseMap:
         [W, W, W, W, W, W, W, W, W, W, W, W, W, W, W],
         [W, W, W, W, W, W, W, W, W, W, W, W, W, W, W],
     ]
-    # pickup points along the bottom staging row
+    # pickup points along the top staging row
     for c in (2, 5, 8, 11):
-        grid[9][c] = 2
+        grid[0][c] = 2
     # dropoff / packing stations
     for c in (2, 8):
         grid[10][c] = 3
