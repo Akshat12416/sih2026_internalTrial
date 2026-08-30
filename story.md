@@ -150,3 +150,14 @@ Because the cell they were fighting over was the actual pickup goal for R1 and R
 - We removed the rule preventing a robot from blacklisting its own goal. If a goal is hopelessly blocked, it *should* be blacklisted.
 - We implemented **Goal Yielding**: if a robot's pathfinder fails (which now happens if its goal is blacklisted), it temporarily gives up on its mission, finds the nearest `FREE` staging area, and drives there to wait it out. 
 - Now, when R1 realizes it can't reach the pickup station because R3 is blocking it, R1 gracefully reverses out of the aisle, "circles the block" by waiting at a staging cell, and allows R3 to leave before trying again!
+
+---
+
+## 7. Surfacing Decentralized Intelligence: The "CURRENT DECISION" Panel
+
+**The Scenario:**
+While the fleet was autonomously resolving traffic jams, the terminal and browser logs were outputting generic `WAITING` statuses. Observers couldn't see the rich mathematical priority negotiations happening under the hood.
+
+**The Solution:**
+We modified `RobotAgent.step()` to explicitly calculate *why* a collision check failed. If a robot is yielding a currently-free cell purely because it lost a priority tie-breaker to another robot, it now emits a rich `YIELDING` telemetry payload.
+The dashboard UI intercepts this and renders a stylized **CURRENT DECISION** panel directly in the ROBOT LOGS tab. This panel exposes the exact peer, conflict cell, and competing starvation-adjusted priorities that led to the HALT decision—proving the depth and determinism of our decentralized OS scheduler in real-time.

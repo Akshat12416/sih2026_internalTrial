@@ -437,8 +437,32 @@ class RobotAgent:
             else:
                 self.wait_ticks += 1
                 self.total_wait_ticks += 1
-                self.display_status = "WAITING"
                 moved = False
+                
+                # Determine EXACTLY why we failed collision check for telemetry
+                block_reason = "OCCUPIED"
+                blocker = None
+                peer_prio = 0
+                for peer_id, intent in self.book.peers.items():
+                    if intent.path and intent.path[0] == next_cell:
+                        blocker = peer_id
+                        break
+                
+                if not blocker:
+                    # Not physically occupied, so we must have lost a priority race
+                    for peer_id, intent in self.book.peers.items():
+                        if len(intent.path) >= 2 and intent.path[1] == next_cell and intent.path[0] != next_cell:
+                            if (eff_priority, self.robot_id) > (intent.priority, peer_id):
+                                blocker = peer_id
+                                block_reason = "YIELD_PRIORITY"
+                                peer_prio = intent.priority
+                                break
+                                
+                if block_reason == "YIELD_PRIORITY":
+                    self.display_status = f"YIELDING|{blocker}|{next_cell[0]},{next_cell[1]}|{eff_priority}|{peer_prio}"
+                else:
+                    self.display_status = "WAITING"
+                
                 
                 # NUDGE PROTOCOL: If we are blocked by a peer sitting directly on next_cell, ask them to move!
                 # We send the nudge every 2 ticks to ensure it gets through but doesn't spam.
