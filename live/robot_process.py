@@ -34,6 +34,7 @@ def main():
     ap.add_argument("--pos", required=True, help="row,col")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--ticks", type=int, default=0, help="0 = run forever")
+    ap.add_argument("--auto-tasks", action="store_true", help="Generate tasks automatically")
     args = ap.parse_args()
 
     random.seed(args.seed + args.index)
@@ -70,7 +71,7 @@ def main():
             # management system dropping new pick orders into the fleet.
             # NOTE: index 0 only ANNOUNCES tasks, it does not assign them --
             # assignment still happens via decentralized auction below.
-            if args.index == 0 and tick >= next_task_at:
+            if args.index == 0 and tick >= next_task_at and args.auto_tasks:
                 task_counter += 1
                 pickup = random.choice(wmap.pickup_points)
                 dropoff = random.choice(wmap.dropoff_points)

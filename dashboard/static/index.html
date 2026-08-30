@@ -100,6 +100,21 @@
   <main>
     <div class="stage"><canvas id="grid" width="900" height="660"></canvas></div>
     <aside>
+      <div class="aside-head">Mission Control</div>
+      <div class="controls" style="padding: 14px 18px; border-bottom: 1px solid var(--line-soft);">
+        <div style="display:flex; gap:10px; margin-bottom: 15px;">
+            <button id="btn-spawn" style="flex:1; padding:8px; background:var(--accent); color:var(--bg); border:none; border-radius:4px; font-family:inherit; font-weight:bold; cursor:pointer;">Spawn Task</button>
+            <button id="btn-auto" style="flex:1; padding:8px; background:var(--panel-2); color:var(--text); border:1px solid var(--line); border-radius:4px; font-family:inherit; cursor:pointer;">Auto: OFF</button>
+        </div>
+        <div style="font-size:11px; margin-bottom:8px; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px;">Simulation Benchmark</div>
+        <div style="display:flex; gap:10px; margin-bottom: 10px;">
+            <input type="number" id="sim-robots" value="4" title="Robots" style="flex:1; padding:6px; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:4px; font-family:inherit;" />
+            <input type="number" id="sim-tasks" value="24" title="Tasks" style="flex:1; padding:6px; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:4px; font-family:inherit;" />
+            <button id="btn-bench" style="padding:6px 12px; background:var(--panel-2); color:var(--text); border:1px solid var(--line); border-radius:4px; font-family:inherit; cursor:pointer;">Run</button>
+        </div>
+        <div id="bench-results" style="display:none; font-size:11px; background:var(--bg); padding:10px; border-radius:4px; border:1px solid var(--line);">
+        </div>
+      </div>
       <div class="aside-head">Live Fleet Telemetry</div>
       <div class="fleet-list" id="fleet"></div>
       <div class="legend">
@@ -241,6 +256,41 @@ function connect(){
 }
 
 loadWarehouse().then(()=>{ draw(); connect(); });
+
+let autoTasks = false;
+document.getElementById('btn-spawn').onclick = async () => {
+  await fetch('/api/spawn-task', {method: 'POST'});
+};
+document.getElementById('btn-auto').onclick = async () => {
+  autoTasks = !autoTasks;
+  const btn = document.getElementById('btn-auto');
+  btn.textContent = `Auto: ${autoTasks ? 'ON' : 'OFF'}`;
+  btn.style.background = autoTasks ? 'var(--accent-dim)' : 'var(--panel-2)';
+  await fetch('/api/auto-tasks', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({active: autoTasks})
+  });
+};
+document.getElementById('btn-bench').onclick = async () => {
+  const btn = document.getElementById('btn-bench');
+  btn.textContent = '...';
+  const robots = parseInt(document.getElementById('sim-robots').value);
+  const tasks = parseInt(document.getElementById('sim-tasks').value);
+  const res = await fetch('/api/run-benchmark', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({robots, tasks})
+  });
+  const data = await res.json();
+  btn.textContent = 'Run';
+  const br = document.getElementById('bench-results');
+  br.style.display = 'block';
+  br.innerHTML = `
+    <div style="margin-bottom:6px; color:var(--accent)">Cooperative: ${data.coop.ticks_to_finish} ticks</div>
+    <div style="margin-bottom:6px; color:var(--warn)">Stop-and-Wait: ${data.base.ticks_to_finish} ticks</div>
+    <div style="font-weight:bold; color:#fff">Time Reduction: ${data.reduction}%</div>
+    <div style="margin-top:6px; color:var(--text-dim)">Collisions: ${data.coop.collisions + data.base.collisions}</div>
+  `;
+};
 </script>
 </body>
 </html>

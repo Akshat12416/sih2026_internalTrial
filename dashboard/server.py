@@ -22,6 +22,8 @@ from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+import random
 
 app = FastAPI()
 STATIC_DIR = Path(__file__).parent / "static"
@@ -96,9 +98,81 @@ async def broadcast_state():
             connections.remove(d)
 
 
+class BenchmarkRequest(BaseModel):
+    robots: int
+    tasks: int
+
+class AutoTaskRequest(BaseModel):
+    active: bool
+
+auto_tasks_active = False
+
+@app.post("/api/spawn-task")
+async def spawn_task():
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from core.layouts import demo_warehouse
+    wmap = demo_warehouse()
+    pickup = random.choice(wmap.pickup_points)
+    dropoff = random.choice(wmap.dropoff_points)
+    tid = f"UI-{int(time.time()*1000)}"
+    msg = {
+        "type": "task_announce",
+        "task_id": tid,
+        "pickup": pickup,
+        "dropoff": dropoff,
+        "t": 0
+    }
+    payload = json.dumps(msg).encode("utf-8")
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    for port in range(9500, 9520):
+        try:
+            sock.sendto(payload, ("127.0.0.1", port))
+        except OSError:
+            pass
+    sock.close()
+    return {"status": "ok", "task_id": tid}
+
+async def auto_task_loop():
+    global auto_tasks_active
+    while True:
+        if auto_tasks_active:
+            await spawn_task()
+            await asyncio.sleep(random.uniform(2.0, 4.0))
+        else:
+            await asyncio.sleep(1.0)
+
+@app.post("/api/auto-tasks")
+async def toggle_auto_tasks(req: AutoTaskRequest):
+    global auto_tasks_active
+    auto_tasks_active = req.active
+    return {"status": "ok", "active": auto_tasks_active}
+
+@app.post("/api/run-benchmark")
+async def run_benchmark(req: BenchmarkRequest):
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from sim.fast_sim import make_task_schedule, run, demo_warehouse
+    wmap = demo_warehouse()
+    seed = 42
+    schedule = make_task_schedule(req.tasks, seed, wmap)
+    coop = run(req.robots, schedule, cooperative=True, max_ticks=2500, seed=seed)
+    base = run(req.robots, schedule, cooperative=False, max_ticks=2500, seed=seed)
+    
+    reduction = 0
+    if base["ticks_to_finish"] > 0:
+        reduction = round(100 * (base["ticks_to_finish"] - coop["ticks_to_finish"]) / base["ticks_to_finish"], 1)
+        
+    return {
+        "coop": coop,
+        "base": base,
+        "reduction": reduction
+    }
+
 @app.on_event("startup")
 async def startup():
     loop_ref["loop"] = asyncio.get_event_loop()
+    asyncio.create_task(auto_task_loop())
 
 
 if __name__ == "__main__":

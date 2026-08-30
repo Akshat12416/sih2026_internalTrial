@@ -20,7 +20,7 @@ import time
 OBSERVER_PORT = 9600
 WEB_PORT = 8000
 
-START_POSITIONS = [(9, 2), (9, 5), (9, 8), (9, 11), (1, 2), (1, 8)]
+START_POSITIONS = [(9, 2), (9, 5), (9, 8), (9, 11), (0, 2), (0, 8)]
 
 
 def main():
