@@ -6,7 +6,46 @@ Below is the chronological story of the problems we faced, the scenarios that ex
 
 ---
 
-## 1. The "Impatient Honking" Paralysis & Premature Yielding
+## 1. Adding Dropoff to Bidding Cost
+
+**The Scenario:**
+A new task was announced. Robot A was very close to the pickup location, but the dropoff location was on the complete opposite side of the warehouse. Robot B was slightly further from the pickup, but its path to the pickup perfectly aligned with the dropoff location. Robot A won the bid, resulting in a massively inefficient cross-warehouse trip.
+
+**The Problem:**
+Originally, robots only calculated their bid cost based on the distance from their current location to the *pickup* point. The actual delivery (dropoff) location was completely ignored during the auction.
+
+**The Solution:**
+We updated the bidding calculation in the Contract Net Protocol. Bids now include the full A* path cost from the robot's current position to the pickup, *plus* the estimated distance from the pickup to the dropoff. This ensures the robot with the most efficient overall trip wins the job.
+
+---
+
+## 2. Robots Phasing Through Each Other (Absolute Occupancy)
+
+**The Scenario:**
+Robots were crossing paths in narrow aisles. Instead of yielding or waiting, they would literally drive over each other, occupying the exact same cell at the exact same time.
+
+**The Problem:**
+Robots were relying on what peers *said* they were going to do. If Robot A was in a cell but broadcasted an intent to move out of it next tick, Robot B would optimistically assume the cell would be free and move into it. If Robot A got delayed, they collided. A peer's stated intent to vacate is not a guarantee.
+
+**The Solution:**
+We added a strict Absolute Occupancy check in `resolve_conflict`. Rule 1: A robot will *never* move into a cell that any peer is confirmed to currently occupy, regardless of what that peer's future path claims. This conservative rule guarantees zero collisions without needing a centralized server.
+
+---
+
+## 3. Space-Time Reservation (Cooperative A*)
+
+**The Scenario:**
+Robots were constantly stopping and starting, unable to navigate around each other smoothly. They were planning paths blindly as if they were the only robot in the warehouse, only stopping when they literally bumped into a peer.
+
+**The Problem:**
+The naive "stop-and-wait" baseline planner ignores peers' future intent. It only reacts to immediate physical blockages, making routing highly inefficient in crowded spaces.
+
+**The Solution:**
+We implemented the `ReservationBook` and **Space-Time A***. Each robot broadcasts a 6-tick future "intent" (its planned path). Peers store this in their local `ReservationBook`. When a robot runs A*, it checks this book and avoids stepping into a specific cell at a specific future timestep if another robot has already claimed it. This allows decentralized, lock-free routing where robots weave around each other seamlessly.
+
+---
+
+## 4. The "Impatient Honking" Paralysis & Premature Yielding
 
 **The Scenario:**
 Robot 5 (R5) received a job but its path was blocked by Robot 3 (R3), which was sitting completely `IDLE`. R5 would ask R3 to move aside. R3 would agree and start moving. However, before R3 could fully get out of the way, R5 would recalculate its path, give up on the aisle entirely, and take a massive, battery-draining detour around the entire warehouse shelf. 
@@ -22,7 +61,7 @@ There were two issues here:
 
 ---
 
-## 2. The Battery Dominance Flaw
+## 5. The Battery Dominance Flaw
 
 **The Scenario:**
 A new task popped up right next to R3. R3 was at 70% battery, which is plenty of power to finish the job. However, R5 was sitting across the warehouse at 95% battery. Because the auction system weighed battery levels strictly linearly, R5's extra 25% battery allowed it to outbid R3. R5 ended up driving all the way across the map to do R3's job, wasting massive amounts of time and overall fleet energy.
@@ -37,7 +76,7 @@ We implemented a **Non-Linear (Quadratic) Battery Penalty**.
 
 ---
 
-## 3. The Symmetric Livelock (Head-to-Head Standoff)
+## 6. The Symmetric Livelock (Head-to-Head Standoff)
 
 **The Scenario:**
 R2 and R4 were both actively carrying packages (`EN_ROUTE`) and met head-to-head in a narrow, 1-wide horizontal aisle. Because both were busy, neither was willing to accept a nudge (which are only for `IDLE` robots). They entered a standoff. After 10 ticks, they both got frustrated at the *exact same time*, both backed up, and both took parallel detours to the next aisle... where they met head-to-head *again*. They were locked in an endless cycle.
@@ -53,7 +92,7 @@ This is a classic decentralized robotics problem called **Symmetric Livelock**.
 
 ---
 
-## 4. Inefficient Dispatching: The Need for Predictive Bidding
+## 7. Inefficient Dispatching: The Need for Predictive Bidding
 
 **The Scenario:**
 R4 was currently dropping off a package. A new task was announced with a pickup location just 2 cells away from R4's current dropoff. However, because R4 was currently busy (`EN_ROUTE_TO_DROPOFF`), it wasn't allowed to bid. Instead, a distant `IDLE` robot won the job and had to travel 15 cells to reach the pickup.
@@ -70,7 +109,7 @@ We implemented **Task Queueing and Predictive Bidding**.
 
 ---
 
-## 5. The "Split-Brain" Bidding Race Condition
+## 8. The "Split-Brain" Bidding Race Condition
 
 **The Scenario:**
 A new task was announced. R4 (busy and moving) and R3 (idle) both bid on it. R4 had the mathematically lower bid. However, the UI reported that the auction was `WON BY R3`. Worse, R4 *also* thought it won, so both robots claimed the task and started moving for the exact same package!
@@ -86,7 +125,7 @@ We implemented a strict **Single-Bid Rule**. Robots now check if they have alrea
 
 ---
 
-## 6. The Auction Window Head-Start Discrepancy
+## 9. The Auction Window Head-Start Discrepancy
 
 **The Scenario:**
 While monitoring the predictive bidding, we noticed an unfair advantage. When a task is announced, an `IDLE` robot sits completely still for the 3-tick auction window, waiting to see if it wins. But a busy robot doesn't pause—it keeps driving towards its dropoff during those 3 ticks!
