@@ -310,7 +310,7 @@ class RobotAgent:
                     self.avoid_until[self.pos] = self.t + 10
                     self.path = []
                     self.nudged = False
-                    self.display_status = "YIELDING"
+                    self.display_status = "MAKING WAY"
                     
                 just_planned_idle = False
                 if not self.path or len(self.path) < 2:
@@ -400,7 +400,7 @@ class RobotAgent:
                             break
                     if blocker:
                         self.send({"type": "nudge", "target": blocker, "from": self.robot_id})
-                        self.display_status = "REQUESTING YIELD"
+                        self.display_status = "ASKING TO MOVE"
                 
                 if self.cooperative and self.wait_ticks > STARVATION_WAIT_LIMIT:
                     # break the deadlock: force a fresh plan (often finds a
