@@ -93,6 +93,7 @@ def main():
             status = {"type": "status", "robot_id": args.id, "pos": agent.pos,
                         "battery": round(agent.battery, 1), "state": agent.state,
                         "display_status": agent.display_status,
+                        "queued": len(agent.queued_tasks),
                         "completed": agent.completed_tasks, "t": tick}
             if agent.current_task:
                 status["task_pickup"] = agent.current_task.pickup

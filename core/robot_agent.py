@@ -73,6 +73,7 @@ class RobotAgent:
     current_task: Optional[Task] = None
     known_tasks: Dict[str, Task] = field(default_factory=dict)
     open_bids: Dict[str, Dict[str, float]] = field(default_factory=dict)  # task_id -> {robot_id: cost}
+    queued_tasks: List[Task] = field(default_factory=list)
     book: ReservationBook = field(init=False)
     wait_ticks: int = 0
     t: int = 0                              # local logical clock
@@ -131,23 +132,41 @@ class RobotAgent:
                     "pickup": task.pickup, "dropoff": task.dropoff, "t": self.t})
 
     def bid_on_open_tasks(self):
-        if self.state != "IDLE" or self.battery < LOW_BATTERY:
+        if self.battery < LOW_BATTERY:
             return
             
         reserved = self.book.as_reserved_table() if self.cooperative else None
         
         for task_id, task in list(self.known_tasks.items()):
-            # 1. Compute true space-time cost to pickup
-            path_to_pickup = astar(self.wmap, self.pos, task.pickup, reserved, start_t=self.t, self_id=self.robot_id)
-            if not path_to_pickup:
-                continue  # Literally cannot reach pickup right now, don't bid!
-            dist_to_pickup = len(path_to_pickup) - 1
-            
-            # 2. Compute true space-time cost from pickup to dropoff
-            # Project time into the future!
-            t_at_pickup = self.t + dist_to_pickup
-            path_to_dropoff = astar(self.wmap, task.pickup, task.dropoff, reserved, start_t=t_at_pickup, self_id=self.robot_id)
-            dist_to_dropoff = len(path_to_dropoff) - 1 if path_to_dropoff else manhattan(task.pickup, task.dropoff)
+            if self.state == "IDLE":
+                # 1. Compute true space-time cost to pickup
+                path_to_pickup = astar(self.wmap, self.pos, task.pickup, reserved, start_t=self.t, self_id=self.robot_id)
+                if not path_to_pickup:
+                    continue  # Literally cannot reach pickup right now, don't bid!
+                dist_to_pickup = len(path_to_pickup) - 1
+                
+                # 2. Compute true space-time cost from pickup to dropoff
+                t_at_pickup = self.t + dist_to_pickup
+                path_to_dropoff = astar(self.wmap, task.pickup, task.dropoff, reserved, start_t=t_at_pickup, self_id=self.robot_id)
+                dist_to_dropoff = len(path_to_dropoff) - 1 if path_to_dropoff else manhattan(task.pickup, task.dropoff)
+            else:
+                # Predictive chaining: robot is currently working, but can bid on its NEXT task!
+                if self.state not in ("EN_ROUTE_TO_PICKUP", "EN_ROUTE_TO_DROPOFF") or not self.current_task:
+                    continue
+                if len(self.queued_tasks) >= 1:
+                    continue  # Only allow queuing 1 task deep to prevent monopolization
+                    
+                # Estimate time remaining on current task
+                if self.state == "EN_ROUTE_TO_PICKUP":
+                    ticks_to_finish = manhattan(self.pos, self.current_task.pickup) + manhattan(self.current_task.pickup, self.current_task.dropoff)
+                else:
+                    ticks_to_finish = manhattan(self.pos, self.current_task.dropoff)
+                    
+                future_pos = self.current_task.dropoff
+                
+                # Distance is the time until we finish our current job + manhattan to new task
+                dist_to_pickup = ticks_to_finish + manhattan(future_pos, task.pickup)
+                dist_to_dropoff = manhattan(task.pickup, task.dropoff)
             
             # 3. Add battery penalty
             # Non-linear penalty: battery > 60% has 0 penalty.
@@ -183,14 +202,20 @@ class RobotAgent:
             if self.t - task.created_t < AUCTION_WINDOW_TICKS:
                 continue  # auction window still open -- give peers time to bid
             winner = min(bids.items(), key=lambda kv: (kv[1], kv[0]))[0]
-            if winner == self.robot_id and self.state == "IDLE":
+            if winner == self.robot_id:
                 task = self.known_tasks.pop(task_id, None)
                 if task:
-                    self.current_task = task
-                    self.state = "EN_ROUTE_TO_PICKUP"
-                    self.path = []
-                    self.send({"type": "task_claimed", "task_id": task_id,
-                                "winner": self.robot_id})
+                    if self.state == "IDLE":
+                        self.current_task = task
+                        self.state = "EN_ROUTE_TO_PICKUP"
+                        self.path = []
+                        self.send({"type": "task_claimed", "task_id": task_id,
+                                    "winner": self.robot_id})
+                    elif self.state in ("EN_ROUTE_TO_PICKUP", "EN_ROUTE_TO_DROPOFF"):
+                        if len(self.queued_tasks) < 1:
+                            self.queued_tasks.append(task)
+                            self.send({"type": "task_claimed", "task_id": task_id,
+                                        "winner": self.robot_id})
             self.open_bids.pop(task_id, None)
 
     # ---------------------------------------------------------------- #
@@ -296,8 +321,12 @@ class RobotAgent:
                 self.state = "EN_ROUTE_TO_DROPOFF"
             elif self.state == "EN_ROUTE_TO_DROPOFF":
                 self.completed_tasks += 1
-                self.current_task = None
-                self.state = "IDLE"
+                if self.queued_tasks:
+                    self.current_task = self.queued_tasks.pop(0)
+                    self.state = "EN_ROUTE_TO_PICKUP"
+                else:
+                    self.current_task = None
+                    self.state = "IDLE"
             elif self.state == "EN_ROUTE_TO_CHARGE":
                 self.state = "CHARGING"
             self.path = []

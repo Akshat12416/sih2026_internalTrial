@@ -380,7 +380,7 @@ function renderFleet(list){
         <span class="robot-id">${rb.robot_id}</span>
         <span class="pill ${pillClass(rb.state)}">${(rb.display_status || rb.state).replaceAll('_',' ')}</span>
       </div>
-      <div class="meta"><span>pos (${rb.pos[0]},${rb.pos[1]})</span><span>tasks: ${rb.completed}</span></div>
+      <div class="meta"><span>pos (${rb.pos[0]},${rb.pos[1]})</span><span>tasks: ${rb.completed}${rb.queued ? ` (+${rb.queued} queued)` : ''}</span></div>
       <div class="batt-track"><div class="batt-fill ${battClass(rb.battery)}" style="width:${rb.battery}%"></div></div>
     `;
     el.appendChild(card);
