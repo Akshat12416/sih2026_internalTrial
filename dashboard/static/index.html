@@ -130,6 +130,15 @@
   .tab:hover { color: var(--text); }
   .tab.active { color: var(--accent); border-bottom: 2px solid var(--accent); }
   
+  .log-filter {
+      background: transparent; border: 1px solid #1c2733; color: #5f6c7a;
+      padding: 2px 8px; border-radius: 12px; font-size: 10px; cursor: pointer;
+      font-family: inherit; transition: all 0.2s;
+  }
+  .log-filter.active, .log-filter:hover {
+      background: #1c2733; color: #dfe7ee; border-color: #5f6c7a;
+  }
+  
   .view-container { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   .view { flex: 1; display: none; overflow: hidden; }
   .view.active { display: flex; flex-direction: column; }
@@ -164,8 +173,16 @@
       </div>
       
       <div id="view-logs" class="view">
-        <div style="padding: 10px 20px; background: #050709; border-bottom: 1px solid #1c2733; font-size: 11px; color: #5f6c7a; letter-spacing: 1px;">
-          > ROBOT CONVERSATION INTERCEPT / LISTENING...
+        <div style="display:flex; justify-content:space-between; align-items:center; padding: 10px 20px; background: #050709; border-bottom: 1px solid #1c2733; font-size: 11px; color: #5f6c7a; letter-spacing: 1px;">
+          <div>> ROBOT CONVERSATION INTERCEPT / LISTENING...</div>
+          <div id="log-filters" style="display:flex; gap:8px;">
+              <button class="log-filter active" data-rid="ALL">ALL</button>
+              <button class="log-filter" data-rid="R1">R1</button>
+              <button class="log-filter" data-rid="R2">R2</button>
+              <button class="log-filter" data-rid="R3">R3</button>
+              <button class="log-filter" data-rid="R4">R4</button>
+              <button class="log-filter" data-rid="R5">R5</button>
+          </div>
         </div>
         <div class="net-log" id="event-log"></div>
       </div>
@@ -421,6 +438,11 @@ function logRobotEvent(robotId, status, t) {
     const msg = document.createElement('div');
     msg.style.marginBottom = '14px';
     msg.style.fontFamily = "'Space Grotesk', sans-serif";
+    msg.dataset.rid = robotId;
+    
+    if (window.currentLogFilter && window.currentLogFilter !== 'ALL' && window.currentLogFilter !== robotId) {
+        msg.style.display = 'none';
+    }
     
     msg.innerHTML = `
         <div style="font-family:'JetBrains Mono', monospace; font-size:11px; color:#5f6c7a; margin-bottom:4px;">
@@ -435,12 +457,30 @@ function logRobotEvent(robotId, status, t) {
     `;
     el.appendChild(msg);
     
-    while(el.children.length > 30) el.removeChild(el.firstChild);
+    while(el.children.length > 50) el.removeChild(el.firstChild);
     el.scrollTop = el.scrollHeight;
 }
 
 let prevStatus = {};
 let prevQueued = {};
+
+window.currentLogFilter = 'ALL';
+document.getElementById('log-filters').addEventListener('click', (e) => {
+    if (e.target.classList.contains('log-filter')) {
+        document.querySelectorAll('.log-filter').forEach(b => b.classList.remove('active'));
+        e.target.classList.add('active');
+        window.currentLogFilter = e.target.dataset.rid;
+        
+        const msgs = document.getElementById('event-log').children;
+        for (let i = 0; i < msgs.length; i++) {
+            if (window.currentLogFilter === 'ALL' || msgs[i].dataset.rid === window.currentLogFilter) {
+                msgs[i].style.display = 'block';
+            } else {
+                msgs[i].style.display = 'none';
+            }
+        }
+    }
+});
 
 function renderFleet(list){
   const el = document.getElementById('fleet');
