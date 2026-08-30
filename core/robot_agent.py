@@ -147,7 +147,13 @@ class RobotAgent:
             dist_to_dropoff = len(path_to_dropoff) - 1 if path_to_dropoff else manhattan(task.pickup, task.dropoff)
             
             # 3. Add battery penalty
-            batt_penalty = int((100.0 - self.battery) * 0.2)  # +1 cost for every 5% battery missing
+            # Non-linear penalty: battery > 60% has 0 penalty.
+            # Below 60%, penalty scales quadratically to strongly discourage low-battery robots
+            # from taking tasks, while letting healthy robots bid purely on distance.
+            batt_penalty = 0
+            if self.battery < 60.0:
+                batt_penalty = int(((60.0 - self.battery) / 10.0) ** 2)
+            
             cost = dist_to_pickup + dist_to_dropoff + batt_penalty
             
             bid_msg = {"type": "bid", "task_id": task_id,
