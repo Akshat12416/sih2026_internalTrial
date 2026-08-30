@@ -358,21 +358,7 @@ class RobotAgent:
             # the bare swap-deadlock tie-break inside resolve_conflict().
 
         # -- broadcast intent AFTER the move decision ---------------------
-        # Critical ordering: this message must describe where we TRULY are
-        # right now (self.pos, already updated above if we moved) rather
-        # than where we were before deciding. A peer processed later this
-        # same tick -- or next tick -- must never plan against a stale,
-        # unconfirmed position; that mismatch is exactly what produces
-        # phantom "vacates that never happened" collisions.
-        #
-        # And critically: if we just got YIELDED/blocked, we must NOT keep
-        # optimistically broadcasting our full intended route as if we're
-        # about to sail through it -- that falsely tells peers our current
-        # cell frees up next tick, when in fact we're still sitting in it.
-        # A stuck robot honestly reserves its OWN cell across the whole
-        # horizon instead, so peers' proactive planning routes around us
-        # for real rather than walking straight at us on a false promise.
-        if moved and self.cooperative:
+        if self.cooperative and len(self.path) >= 2:
             horizon = [self.pos] + self.path[1:PLAN_HORIZON]
         elif self.cooperative:
             horizon = [self.pos] * PLAN_HORIZON
