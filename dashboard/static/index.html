@@ -92,10 +92,30 @@
     font-family: 'JetBrains Mono', monospace; font-size: 12px;
     color: #4af626; padding: 20px; overflow-y: auto;
   }
-  .log-entry { margin-bottom: 6px; line-height: 1.4; text-shadow: 0 0 4px currentColor; }
-  .log-entry.announce { color: #3d9cff; }
-  .log-entry.bid { color: #ffcf6b; opacity: 0.7; }
-  .log-entry.claim { color: #ff8fd6; font-weight: bold; }
+  .auction-card {
+    border: 1px solid var(--line);
+    background: var(--panel-2);
+    margin-bottom: 10px;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .auction-header {
+    padding: 10px 15px;
+    background: #0e131a;
+    cursor: pointer;
+    color: #3d9cff;
+    font-weight: bold;
+    transition: background 0.2s;
+  }
+  .auction-header:hover { background: #151d27; }
+  .auction-card.closed .auction-header { color: #ff8fd6; }
+  .auction-body {
+    display: none;
+    padding: 15px;
+    background: #090c10;
+    border-top: 1px solid var(--line);
+  }
+  .auction-card.expanded .auction-body { display: block; }
   
   .tabs {
     position: relative; z-index: 10;
@@ -368,6 +388,78 @@ function renderFleet(list){
 }
 
 let seenEvents = new Set();
+let auctions = {}; // task_id -> state
+
+function renderAuctions() {
+    const logEl = document.getElementById('net-log');
+    const sorted = Object.entries(auctions).sort((a,b) => b[1].t - a[1].t);
+    
+    sorted.forEach(([tid, auc]) => {
+        if (!auc.element) {
+            auc.element = document.createElement('div');
+            auc.element.className = 'auction-card';
+            
+            const header = document.createElement('div');
+            header.className = 'auction-header';
+            header.onclick = () => auc.element.classList.toggle('expanded');
+            
+            const body = document.createElement('div');
+            body.className = 'auction-body';
+            
+            auc.element.appendChild(header);
+            auc.element.appendChild(body);
+        }
+        
+        // update header
+        const tStr = Math.floor(auc.t).toString().slice(-4);
+        let headerText = `[T=${tStr}] AUCTION: TASK ${tid.slice(-6)} `;
+        if (auc.status === 'OPEN') {
+            auc.element.classList.remove('closed');
+            headerText += `(OPEN - ${Object.keys(auc.bids).length} BIDS)`;
+        } else {
+            auc.element.classList.add('closed');
+            headerText += `(WON BY ${auc.winner})`;
+        }
+        auc.element.querySelector('.auction-header').textContent = headerText;
+        
+        // update body
+        let bodyHtml = '<div style="margin-bottom:8px; border-bottom:1px solid #1c2733; padding-bottom:4px; display:flex; color:#5f6c7a; font-size:10px;">' +
+                       '<span style="flex:1">ROBOT</span><span style="flex:2">BID CALCULATION</span><span style="flex:1; text-align:right;">TOTAL COST</span></div>';
+        
+        const sortedBids = Object.entries(auc.bids).sort((a,b) => a[1].cost - b[1].cost);
+        sortedBids.forEach(([rid, bidData]) => {
+            const isWinner = auc.winner === rid;
+            const rowStyle = isWinner ? 'color: #ff8fd6; font-weight: bold;' : 'color: #ffcf6b;';
+            const details = bidData.details || {distance: bidData.cost, battery_penalty: 0};
+            bodyHtml += `<div style="display:flex; margin-bottom:6px; ${rowStyle}">
+                <span style="flex:1">[${rid}]</span>
+                <span style="flex:2; opacity:0.8;">Dist(${Math.floor(details.distance)}) + BattPenalty(${details.battery_penalty})</span>
+                <span style="flex:1; text-align:right;">${Math.floor(bidData.cost)}</span>
+            </div>`;
+        });
+        
+        if (Object.keys(auc.bids).length === 0) {
+            bodyHtml += `<div style="opacity:0.5">Waiting for bids...</div>`;
+        }
+        
+        auc.element.querySelector('.auction-body').innerHTML = bodyHtml;
+    });
+    
+    // sort DOM (newest at top)
+    sorted.forEach(([tid, auc]) => {
+        logEl.appendChild(auc.element);
+    });
+    
+    // keep only last 20 auctions to prevent DOM bloat
+    while (logEl.children.length > 20) {
+        const last = logEl.lastChild;
+        logEl.removeChild(last);
+        // also remove from auctions object
+        const toDelete = sorted.find(s => s[1].element === last);
+        if (toDelete) delete auctions[toDelete[0]];
+    }
+}
+
 function connect(){
   const ws = new WebSocket(`ws://${location.host}/ws`);
   ws.onopen = ()=> document.getElementById('conn').textContent = 'mesh online';
@@ -377,25 +469,29 @@ function connect(){
     if(data.robots) renderFleet(data.robots);
     
     if(data.network_events) {
-      const logEl = document.getElementById('net-log');
-      let added = false;
+      let updated = false;
       data.network_events.forEach(ev => {
           const hash = ev.type + ev.task_id + ev.robot_id + ev.local_t;
           if(seenEvents.has(hash)) return;
           seenEvents.add(hash);
-          added = true;
+          updated = true;
           
-          const el = document.createElement('div');
-          el.className = 'log-entry ' + (ev.type==='task_announce'?'announce':ev.type==='task_claimed'?'claim':'bid');
-          let text = `[T=${Math.floor(ev.local_t).toString().slice(-4)}] `;
-          if(ev.type === 'task_announce') text += `> TASK ${ev.task_id.slice(-6)} ANNOUNCED ACROSS MESH`;
-          if(ev.type === 'bid') text += `> [${ev.robot_id}] BIDS COST=${Math.floor(ev.cost)} FOR TASK ${ev.task_id.slice(-6)}`;
-          if(ev.type === 'task_claimed') text += `> [${ev.winner}] WINS AUCTION FOR TASK ${ev.task_id.slice(-6)}`;
-          el.textContent = text;
-          logEl.appendChild(el);
+          if (!auctions[ev.task_id]) {
+             auctions[ev.task_id] = { t: ev.local_t, status: 'OPEN', bids: {}, winner: null, element: null };
+          }
+          
+          if (ev.type === 'task_announce') {
+              auctions[ev.task_id].t = ev.local_t;
+          } else if (ev.type === 'bid') {
+              auctions[ev.task_id].bids[ev.robot_id] = { cost: ev.cost, details: ev.details };
+          } else if (ev.type === 'task_claimed') {
+              auctions[ev.task_id].status = 'CLOSED';
+              auctions[ev.task_id].winner = ev.winner;
+          }
       });
-      if(added) logEl.scrollTop = logEl.scrollHeight;
-      while(logEl.children.length > 500) logEl.removeChild(logEl.firstChild);
+      if(updated) {
+          renderAuctions();
+      }
     }
   };
 }

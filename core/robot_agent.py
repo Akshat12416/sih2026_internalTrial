@@ -127,9 +127,13 @@ class RobotAgent:
         if self.state != "IDLE" or self.battery < LOW_BATTERY:
             return
         for task_id, task in list(self.known_tasks.items()):
-            cost = manhattan(self.pos, task.pickup)
+            dist = manhattan(self.pos, task.pickup)
+            batt_penalty = int((100.0 - self.battery) * 0.2)  # +1 cost for every 5% battery missing
+            cost = dist + batt_penalty
+            
             bid_msg = {"type": "bid", "task_id": task_id,
-                        "robot_id": self.robot_id, "cost": cost}
+                        "robot_id": self.robot_id, "cost": cost,
+                        "details": {"distance": dist, "battery_penalty": batt_penalty}}
             self.send(bid_msg)
             # loop back to ourselves too -- the network layer correctly
             # never delivers our own broadcasts back to us (it's not our
