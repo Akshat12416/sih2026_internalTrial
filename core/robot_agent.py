@@ -93,7 +93,7 @@ class RobotAgent:
             self.book.update(PeerIntent(
                 robot_id=msg["robot_id"], priority=msg["priority"],
                 path=[tuple(c) for c in msg["path"]], start_t=msg["start_t"],
-                received_at=msg["start_t"]))
+                received_at=time.time()))
         elif kind == "task_announce":
             created_t = msg.get("t") or self.t
             task = Task(msg["task_id"], tuple(msg["pickup"]), tuple(msg["dropoff"]), created_t)
@@ -219,7 +219,7 @@ class RobotAgent:
         1) battery/state transitions  2) plan if needed  3) broadcast intent
         4) resolve local conflicts    5) move (or yield)."""
         self.t += 1
-        self.book.prune(now=self.t)
+        self.book.prune(now=time.time())
         if self.avoid_until:
             self.avoid_until = {c: exp for c, exp in self.avoid_until.items() if exp > self.t}
 
@@ -300,7 +300,7 @@ class RobotAgent:
                             self.avoid_until[next_cell] = self.t + AVOID_WINDOW
                             self.path = []  # try a different staging cell next tick
                             self.wait_ticks = 0
-                        horizon = [self.pos] * PLAN_HORIZON  # honestly stuck -- don't over-promise
+                        horizon = [self.pos] + self.path[1:PLAN_HORIZON] if self.cooperative and len(self.path) >= 2 else [self.pos] * PLAN_HORIZON
                     self.send({"type": "intent", "robot_id": self.robot_id,
                                 "priority": self.priority_base, "path": horizon,
                                 "start_t": self.t})
