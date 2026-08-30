@@ -375,29 +375,72 @@ function pillClass(state){
 }
 function battClass(b){ if(b<20) return 'low'; if(b<50) return 'mid'; return ''; }
 
+let lastLoggedTime = {};
+
 function logRobotEvent(robotId, status, t) {
     const el = document.getElementById('event-log');
-    const msg = document.createElement('div');
-    msg.style.marginBottom = '6px';
+    
+    // Debounce WAITING and ASKING TO MOVE if they happen back-to-back quickly
+    let shouldDebounce = (status === 'WAITING' || status === 'ASKING TO MOVE');
+    let lastT = lastLoggedTime[robotId + status] || 0;
+    if (shouldDebounce && (t - lastT < 6)) {
+        return; // Skip logging to prevent alternating spam
+    }
+    lastLoggedTime[robotId + status] = t;
     
     let color = '#dfe7ee';
     let text = status;
-    if (status === 'ASKING TO MOVE') { color = '#ffcf6b'; text = 'Hey, can you please make way?'; }
-    if (status === 'MAKING WAY') { color = '#37f0b0'; text = 'Sure, stepping aside!'; }
-    if (status === 'WAITING') { color = '#ffb454'; text = 'Blocked, waiting for path to clear...'; }
-    if (status === 'RECALCULATING') { color = '#ff5c72'; text = 'Path blocked for too long. Recalculating detour!'; }
-    if (status === 'YIELDING') { color = '#a78bfa'; text = 'Yielding to higher priority robot.'; }
+    let tech = '';
+    if (status === 'ASKING TO MOVE') { 
+        color = '#ffcf6b'; text = 'Hey, can you please make way?'; 
+        tech = 'TX: UDP NUDGE_REQ -> PEER (blocked=true)'; 
+    }
+    else if (status === 'MAKING WAY') { 
+        color = '#37f0b0'; text = 'Sure, stepping aside!'; 
+        tech = 'RX: UDP NUDGE_REQ -> STAGING_SEARCH -> PATH_UPDATE'; 
+    }
+    else if (status === 'WAITING') { 
+        color = '#ffb454'; text = 'Blocked, waiting for path to clear...'; 
+        tech = 'STATE: yield (ticks++) -> resolve_conflict=False'; 
+    }
+    else if (status === 'RECALCULATING') { 
+        color = '#ff5c72'; text = 'Path blocked for too long. Recalculating detour!'; 
+        tech = 'STATE: starvation_limit_exceeded -> A* REPLAN (cell_blacklisted)'; 
+    }
+    else if (status === 'YIELDING') { 
+        color = '#a78bfa'; text = 'Yielding to higher priority robot.'; 
+        tech = 'PRIORITY_NEGOTIATION: base_prio < peer_prio -> HALT'; 
+    }
+    else if (status === 'QUEUED') {
+        color = '#3d9cff'; text = 'I am nearby, I will take this next!';
+        tech = 'AUCTION_WIN (predictive) -> TASK_QUEUED -> SEAMLESS_HANDOFF';
+    }
 
     const tStr = Math.floor(t || 0).toString().padStart(4, '0');
     
-    msg.innerHTML = `<span style="color:#5f6c7a">[T=${tStr}]</span> <span style="color:${color}; font-weight:bold">[${robotId}]</span> <span style="color:${color}">${text}</span>`;
+    const msg = document.createElement('div');
+    msg.style.marginBottom = '14px';
+    msg.style.fontFamily = "'Space Grotesk', sans-serif";
+    
+    msg.innerHTML = `
+        <div style="font-family:'JetBrains Mono', monospace; font-size:11px; color:#5f6c7a; margin-bottom:4px;">
+            [T=${tStr}] <span style="color:${color}; font-weight:bold;">${robotId}</span>
+        </div>
+        <div style="background:#151d27; border-left:3px solid ${color}; padding:8px 12px; border-radius:4px; font-size:13px; color:#dfe7ee; margin-bottom:6px;">
+            ${text}
+        </div>
+        <div style="font-family:'JetBrains Mono', monospace; font-size:10px; color:#5f6c7a; background:#090c10; padding:4px 8px; border-radius:4px; border:1px solid #1c2733; display:inline-block;">
+            <span style="color:${color}">⚙️</span> ${tech}
+        </div>
+    `;
     el.appendChild(msg);
     
-    while(el.children.length > 50) el.removeChild(el.firstChild);
+    while(el.children.length > 30) el.removeChild(el.firstChild);
     el.scrollTop = el.scrollHeight;
 }
 
 let prevStatus = {};
+let prevQueued = {};
 
 function renderFleet(list){
   const el = document.getElementById('fleet');
@@ -410,6 +453,13 @@ function renderFleet(list){
         logRobotEvent(rb.robot_id, rb.display_status, rb.t);
     }
     prevStatus[rb.robot_id] = rb.display_status;
+    
+    let prevQ = prevQueued[rb.robot_id] || 0;
+    let currQ = rb.queued || 0;
+    if (currQ > prevQ) {
+        logRobotEvent(rb.robot_id, 'QUEUED', rb.t);
+    }
+    prevQueued[rb.robot_id] = currQ;
     
     const card = document.createElement('div');
     card.className = 'robot-card';
