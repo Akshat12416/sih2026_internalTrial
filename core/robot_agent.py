@@ -95,7 +95,8 @@ class RobotAgent:
                 path=[tuple(c) for c in msg["path"]], start_t=msg["start_t"],
                 received_at=msg["start_t"]))
         elif kind == "task_announce":
-            task = Task(msg["task_id"], tuple(msg["pickup"]), tuple(msg["dropoff"]), msg["t"])
+            created_t = msg.get("t") or self.t
+            task = Task(msg["task_id"], tuple(msg["pickup"]), tuple(msg["dropoff"]), created_t)
             self.known_tasks.setdefault(task.task_id, task)
         elif kind == "bid":
             self.open_bids.setdefault(msg["task_id"], {})[msg["robot_id"]] = msg["cost"]
