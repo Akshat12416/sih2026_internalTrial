@@ -102,11 +102,13 @@
     <aside>
       <div class="aside-head">Mission Control</div>
       <div class="controls" style="padding: 14px 18px; border-bottom: 1px solid var(--line-soft);">
-        <div style="font-size:11px; margin-bottom:8px; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px;">Custom Task (Row, Col)</div>
-        <div style="display:flex; gap:10px; margin-bottom: 15px;">
-            <input type="text" id="task-pickup" placeholder="e.g. 0,2" title="Pickup (r,c)" style="flex:1; padding:6px; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:4px; font-family:inherit; font-size:12px;" />
-            <input type="text" id="task-dropoff" placeholder="e.g. 10,2" title="Dropoff (r,c)" style="flex:1; padding:6px; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:4px; font-family:inherit; font-size:12px;" />
-            <button id="btn-spawn" style="padding:6px 12px; background:var(--accent); color:var(--bg); border:none; border-radius:4px; font-family:inherit; font-weight:bold; cursor:pointer;">Send</button>
+        <div style="font-size:11px; margin-bottom:8px; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px;">Custom Tasks</div>
+        <div style="display:flex; flex-direction:column; gap:8px; margin-bottom: 15px;">
+            <div id="queue-status" style="font-size:12px; color:var(--text); padding:6px; background:var(--panel-2); border-radius:4px; border:1px solid var(--line); text-align:center;">Click map to add tasks (0 queued)</div>
+            <div style="display:flex; gap:10px;">
+                <button id="btn-batch" style="flex:2; padding:6px 12px; background:var(--accent); color:var(--bg); border:none; border-radius:4px; font-family:inherit; font-weight:bold; cursor:pointer;">Send Queue</button>
+                <button id="btn-clear" style="flex:1; padding:6px 12px; background:var(--danger); color:var(--bg); border:none; border-radius:4px; font-family:inherit; font-weight:bold; cursor:pointer;">Clear</button>
+            </div>
         </div>
         <div style="display:flex; gap:10px; margin-bottom: 15px;">
             <button id="btn-auto" style="flex:1; padding:8px; background:var(--panel-2); color:var(--text); border:1px solid var(--line); border-radius:4px; font-family:inherit; cursor:pointer;">Auto Random Tasks: OFF</button>
@@ -201,6 +203,33 @@ function colorFor(id, idx){ return robotColors[idx % robotColors.length]; }
 
 function draw(){
   drawStatic();
+  // draw queued tasks
+  ctx.lineWidth = 2;
+  ctx.setLineDash([4, 4]);
+  if (typeof taskQueue !== 'undefined') {
+    taskQueue.forEach(t => {
+        const [px, py] = cellCenter(t.pickup[0], t.pickup[1]);
+        const [dx, dy] = cellCenter(t.dropoff[0], t.dropoff[1]);
+        ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(dx, dy);
+        ctx.strokeStyle = '#3d9cff'; ctx.stroke();
+        ctx.fillStyle = '#3d9cff';
+        ctx.beginPath(); ctx.arc(px, py, cell*0.2, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#ff8fd6';
+        ctx.beginPath(); ctx.arc(dx, dy, cell*0.2, 0, Math.PI*2); ctx.fill();
+    });
+  }
+  ctx.setLineDash([]);
+  
+  if (typeof currentPickup !== 'undefined' && currentPickup) {
+      const [px, py] = cellCenter(currentPickup[0], currentPickup[1]);
+      ctx.fillStyle = '#3d9cff';
+      ctx.beginPath(); ctx.arc(px, py, cell*0.2, 0, Math.PI*2); ctx.fill();
+      const t = Date.now() / 200;
+      ctx.strokeStyle = `rgba(61, 156, 255, ${0.5 + Math.sin(t)*0.5})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(px, py, cell*0.4, 0, Math.PI*2); ctx.stroke();
+  }
+
   let i=0;
   for(const id in robots){
     const rb = robots[id];
@@ -263,25 +292,66 @@ function connect(){
 loadWarehouse().then(()=>{ draw(); connect(); });
 
 let autoTasks = false;
-document.getElementById('btn-spawn').onclick = async () => {
-  const pInput = document.getElementById('task-pickup').value;
-  const dInput = document.getElementById('task-dropoff').value;
-  let body = {};
-  if(pInput.trim()) {
-      body.pickup = pInput.split(',').map(s=>parseInt(s.trim()));
-  }
-  if(dInput.trim()) {
-      body.dropoff = dInput.split(',').map(s=>parseInt(s.trim()));
-  }
-  
-  await fetch('/api/spawn-task', {
-      method: 'POST', 
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body)
-  });
-  document.getElementById('task-pickup').value = '';
-  document.getElementById('task-dropoff').value = '';
+let taskQueue = [];
+let clickState = 'SELECT_PICKUP';
+let currentPickup = null;
+
+canvas.addEventListener('click', (e) => {
+    if(!wmap) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    const c = Math.floor((x - offX) / cell);
+    const r = Math.floor((y - offY) / cell);
+    
+    if(r < 0 || r >= wmap.grid.length || c < 0 || c >= wmap.grid[0].length) return;
+    if(wmap.grid[r][c] === 1) return; // skip shelves
+    
+    if(clickState === 'SELECT_PICKUP') {
+        currentPickup = [r, c];
+        clickState = 'SELECT_DROPOFF';
+        document.getElementById('queue-status').textContent = `Select dropoff for (${r}, ${c})...`;
+    } else {
+        taskQueue.push({pickup: currentPickup, dropoff: [r, c]});
+        currentPickup = null;
+        clickState = 'SELECT_PICKUP';
+        updateQueueUI();
+    }
+});
+
+function updateQueueUI() {
+    const el = document.getElementById('queue-status');
+    if(taskQueue.length === 0) {
+        el.textContent = `Click map to add tasks (0 queued)`;
+    } else {
+        el.textContent = `${taskQueue.length} task(s) queued. Click for more.`;
+    }
+}
+
+document.getElementById('btn-clear').onclick = () => {
+    taskQueue = [];
+    currentPickup = null;
+    clickState = 'SELECT_PICKUP';
+    updateQueueUI();
 };
+
+document.getElementById('btn-batch').onclick = async () => {
+    if(taskQueue.length === 0) return;
+    const btn = document.getElementById('btn-batch');
+    btn.textContent = '...';
+    await fetch('/api/spawn-batch', {
+        method: 'POST', 
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({tasks: taskQueue})
+    });
+    taskQueue = [];
+    currentPickup = null;
+    clickState = 'SELECT_PICKUP';
+    updateQueueUI();
+    btn.textContent = 'Send Queue';
+};
+
 document.getElementById('btn-auto').onclick = async () => {
   autoTasks = !autoTasks;
   const btn = document.getElementById('btn-auto');

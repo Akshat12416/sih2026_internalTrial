@@ -113,6 +113,32 @@ class TaskRequest(BaseModel):
     pickup: list = None
     dropoff: list = None
 
+class TaskBatchRequest(BaseModel):
+    tasks: list[dict]
+
+@app.post("/api/spawn-batch")
+async def spawn_batch(req: TaskBatchRequest):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    for t_req in req.tasks:
+        pickup = tuple(t_req["pickup"])
+        dropoff = tuple(t_req["dropoff"])
+        tid = f"UI-{int(time.time()*1000)}-{random.randint(100,999)}"
+        msg = {
+            "type": "task_announce",
+            "task_id": tid,
+            "pickup": pickup,
+            "dropoff": dropoff,
+            "t": 0
+        }
+        payload = json.dumps(msg).encode("utf-8")
+        for port in range(9500, 9520):
+            try:
+                sock.sendto(payload, ("127.0.0.1", port))
+            except OSError:
+                pass
+    sock.close()
+    return {"status": "ok", "count": len(req.tasks)}
+
 @app.post("/api/spawn-task")
 async def spawn_task(req: TaskRequest = None):
     import sys
