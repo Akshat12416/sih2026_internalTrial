@@ -126,6 +126,9 @@
       <div class="fleet-list" id="fleet"></div>
       <div class="legend">
         <div class="item"><span class="swatch" style="background:var(--amber)"></span> Choke point (1-wide aisle)</div>
+        <div class="item"><span class="swatch" style="background:#3d9cff; border-radius:50%;"></span> Pickup Station</div>
+        <div class="item"><span class="swatch" style="background:#ff8fd6; border-radius:50%;"></span> Dropoff Station</div>
+        <div class="item"><span class="swatch" style="background:#7fffb0; border-radius:50%;"></span> Charging Dock</div>
         <div class="item"><span class="swatch" style="background:var(--accent)"></span> Robot — moving</div>
         <div class="item"><span class="swatch" style="background:var(--warn)"></span> Robot — waiting / yielding</div>
         <div class="item"><span class="swatch" style="background:var(--danger)"></span> Blocked cell</div>
@@ -185,8 +188,10 @@ function drawStatic(){
       ctx.beginPath(); ctx.arc(cx,cy,cell*0.14,0,Math.PI*2); ctx.fill();
     });
   };
-  markPoint(wmap.pickup, '#3d9cff', 'P');
-  markPoint(wmap.dropoff, '#ff8fd6', 'D');
+  if(typeof autoTasks !== 'undefined' && autoTasks) {
+    markPoint(wmap.pickup, '#3d9cff', 'P');
+    markPoint(wmap.dropoff, '#ff8fd6', 'D');
+  }
   markPoint(wmap.charge, '#7fffb0', 'C');
 
   ctx.strokeStyle = '#ffcf6b55';
@@ -233,6 +238,25 @@ function draw(){
   let i=0;
   for(const id in robots){
     const rb = robots[id];
+    
+    // Draw active task pickup/dropoff for this robot
+    if(rb.task_pickup && rb.task_dropoff) {
+      const [px, py] = cellCenter(rb.task_pickup[0], rb.task_pickup[1]);
+      const [dx, dy] = cellCenter(rb.task_dropoff[0], rb.task_dropoff[1]);
+      
+      ctx.fillStyle = '#3d9cff';
+      ctx.beginPath(); ctx.arc(px, py, cell*0.2, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#ff8fd6';
+      ctx.beginPath(); ctx.arc(dx, dy, cell*0.2, 0, Math.PI*2); ctx.fill();
+      
+      // Draw faint dashed line connecting them for context
+      ctx.lineWidth = 1;
+      ctx.setLineDash([2, 4]);
+      ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(dx, dy);
+      ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    
     const [cx, cy] = cellCenter(rb.r, rb.c);
     const col = colorFor(id, rb.idx);
     // glow

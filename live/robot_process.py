@@ -93,6 +93,9 @@ def main():
             status = {"type": "status", "robot_id": args.id, "pos": agent.pos,
                         "battery": round(agent.battery, 1), "state": agent.state,
                         "completed": agent.completed_tasks, "t": tick}
+            if agent.current_task:
+                status["task_pickup"] = agent.current_task.pickup
+                status["task_dropoff"] = agent.current_task.dropoff
             link.broadcast(status)
             print(f"[{args.id}] t={tick} pos={agent.pos} state={agent.state} "
                     f"batt={agent.battery:.0f}% done={agent.completed_tasks}", flush=True)
