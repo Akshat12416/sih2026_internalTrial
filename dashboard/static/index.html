@@ -159,6 +159,7 @@
         <div class="tab active" data-target="view-map">LIVE MAP</div>
         <div class="tab" data-target="view-telemetry">SWARM TELEMETRY</div>
         <div class="tab" data-target="view-logs">ROBOT LOGS</div>
+        <div class="tab" data-target="view-benchmark">BENCHMARK</div>
       </div>
       
       <div id="view-map" class="view active">
@@ -186,30 +187,48 @@
         </div>
         <div class="net-log" id="event-log"></div>
       </div>
+      
+      <div id="view-benchmark" class="view">
+        <div style="padding: 30px; color: var(--text); font-family: 'Space Grotesk', sans-serif;">
+          <h2 style="margin-bottom:10px;">Simulation Benchmark</h2>
+          <p style="color: var(--text-dim); margin-bottom: 30px; font-family: 'JetBrains Mono', monospace; font-size:13px; max-width:600px; line-height:1.5;">
+            Run a headless fast-simulation to mathematically prove the efficiency of the decentralized cooperative routing vs a naive stop-and-wait algorithm.
+          </p>
+          
+          <div style="display:flex; gap:20px; margin-bottom: 30px; max-width: 500px; font-family: 'JetBrains Mono', monospace;">
+            <div style="flex:1">
+                <label style="display:block; font-size:11px; color:var(--text-dim); margin-bottom:6px; letter-spacing:1px;">ROBOTS</label>
+                <input type="number" id="sim-robots" value="4" style="width:100%; padding:10px; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:4px; font-family:inherit; font-size:14px;" />
+            </div>
+            <div style="flex:1">
+                <label style="display:block; font-size:11px; color:var(--text-dim); margin-bottom:6px; letter-spacing:1px;">TASKS</label>
+                <input type="number" id="sim-tasks" value="24" style="width:100%; padding:10px; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:4px; font-family:inherit; font-size:14px;" />
+            </div>
+            <div style="display:flex; align-items:flex-end;">
+                <button id="btn-bench" style="padding:10px 24px; background:var(--accent); color:var(--bg); border:none; border-radius:4px; font-family:inherit; font-weight:bold; cursor:pointer; font-size:14px;">Run Benchmark</button>
+            </div>
+          </div>
+          
+          <div id="bench-results" style="display:none; font-size:14px; background:var(--panel-2); padding:24px; border-radius:8px; border:1px solid var(--line); max-width: 500px; font-family: 'JetBrains Mono', monospace;">
+          </div>
+        </div>
+      </div>
     </div>
     
-    <aside>
+    <aside style="overflow-x: hidden;">
       <div class="aside-head">Mission Control</div>
       <div class="controls" style="padding: 14px 18px; border-bottom: 1px solid var(--line-soft);">
         <div style="font-size:11px; margin-bottom:8px; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px;">Custom Tasks</div>
         <div style="display:flex; flex-direction:column; gap:8px; margin-bottom: 15px;">
-            <div id="queue-status" style="font-size:12px; color:var(--text); padding:6px; background:var(--panel-2); border-radius:4px; border:1px solid var(--line); text-align:center;">Click map to add tasks (0 queued)</div>
-            <div style="display:flex; gap:10px;">
-                <button id="btn-batch" style="flex:2; padding:6px 12px; background:var(--accent); color:var(--bg); border:none; border-radius:4px; font-family:inherit; font-weight:bold; cursor:pointer;">Send Queue</button>
-                <button id="btn-clear" style="flex:1.5; padding:6px 12px; background:var(--warn); color:var(--bg); border:none; border-radius:4px; font-family:inherit; font-weight:bold; cursor:pointer;">Clear Tasks</button>
+            <div id="queue-status" style="font-size:12px; color:var(--text); padding:6px; background:var(--panel-2); border-radius:4px; border:1px solid var(--line); text-align:center;">Click map to add tasks (0)</div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                <button id="btn-batch" style="padding:8px 0; background:var(--accent); color:var(--bg); border:none; border-radius:4px; font-family:inherit; font-weight:bold; cursor:pointer; font-size:11px; white-space:nowrap;">Send Queue</button>
+                <button id="btn-clear" style="padding:8px 0; background:var(--warn); color:var(--bg); border:none; border-radius:4px; font-family:inherit; font-weight:bold; cursor:pointer; font-size:11px; white-space:nowrap;">Clear Tasks</button>
             </div>
         </div>
-        <div style="display:flex; gap:10px; margin-bottom: 15px;">
-            <button id="btn-auto" style="flex:2; padding:8px; background:var(--panel-2); color:var(--text); border:1px solid var(--line); border-radius:4px; font-family:inherit; cursor:pointer;">Auto Random Tasks: OFF</button>
-            <button id="btn-reset" style="flex:1; padding:8px; background:var(--danger); color:var(--bg); border:none; border-radius:4px; font-family:inherit; font-weight:bold; cursor:pointer;">Reset Fleet</button>
-        </div>
-        <div style="font-size:11px; margin-bottom:8px; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px;">Simulation Benchmark</div>
-        <div style="display:flex; gap:10px; margin-bottom: 10px;">
-            <input type="number" id="sim-robots" value="4" title="Robots" style="flex:1; padding:6px; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:4px; font-family:inherit;" />
-            <input type="number" id="sim-tasks" value="24" title="Tasks" style="flex:1; padding:6px; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:4px; font-family:inherit;" />
-            <button id="btn-bench" style="padding:6px 12px; background:var(--panel-2); color:var(--text); border:1px solid var(--line); border-radius:4px; font-family:inherit; cursor:pointer;">Run</button>
-        </div>
-        <div id="bench-results" style="display:none; font-size:11px; background:var(--bg); padding:10px; border-radius:4px; border:1px solid var(--line);">
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+            <button id="btn-auto" style="padding:8px 0; background:var(--panel-2); color:var(--text); border:1px solid var(--line); border-radius:4px; font-family:inherit; cursor:pointer; font-size:11px; white-space:nowrap;">Auto: OFF</button>
+            <button id="btn-reset" style="padding:8px 0; background:var(--danger); color:var(--bg); border:none; border-radius:4px; font-family:inherit; font-weight:bold; cursor:pointer; font-size:11px; white-space:nowrap;">Reset Fleet</button>
         </div>
       </div>
       <div class="aside-head">Live Fleet Telemetry</div>
@@ -763,10 +782,10 @@ document.getElementById('btn-bench').onclick = async () => {
   const br = document.getElementById('bench-results');
   br.style.display = 'block';
   br.innerHTML = `
-    <div style="margin-bottom:6px; color:var(--accent)">Cooperative: ${data.coop.ticks_to_finish} ticks</div>
-    <div style="margin-bottom:6px; color:var(--warn)">Stop-and-Wait: ${data.base.ticks_to_finish} ticks</div>
-    <div style="font-weight:bold; color:#fff">Time Reduction: ${data.reduction}%</div>
-    <div style="margin-top:6px; color:var(--text-dim)">Collisions: ${data.coop.collisions + data.base.collisions}</div>
+    <div style="margin-bottom:8px; color:var(--accent); display:flex; justify-content:space-between;"><span>Cooperative (Our OS):</span> <span>${data.coop.ticks_to_finish} ticks</span></div>
+    <div style="margin-bottom:16px; color:var(--warn); display:flex; justify-content:space-between;"><span>Stop-and-Wait (Base):</span> <span>${data.base.ticks_to_finish} ticks</span></div>
+    <div style="padding-top:16px; border-top:1px solid var(--line); font-weight:bold; color:#fff; font-size:18px; margin: 10px 0;">Efficiency Gain: ${data.reduction}%</div>
+    <div style="margin-top:12px; color:var(--text-dim)">Total Deadlocks: ${data.coop.collisions + data.base.collisions}</div>
   `;
 };
 </script>
