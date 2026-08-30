@@ -30,6 +30,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 fleet_state: dict = {}       # robot_id -> latest status
+network_events: list = []    # max 50 recent events
 connections: list = []
 loop_ref = {"loop": None}
 
@@ -76,6 +77,16 @@ def udp_listener(port: int):
             continue
         if msg.get("type") == "status":
             fleet_state[msg["robot_id"]] = msg
+        elif msg.get("type") == "intent":
+            if msg["robot_id"] in fleet_state:
+                fleet_state[msg["robot_id"]]["intent"] = msg["path"]
+                fleet_state[msg["robot_id"]]["priority"] = msg["priority"]
+        elif msg.get("type") in ("task_announce", "bid", "task_claimed"):
+            evt = dict(msg)
+            evt["local_t"] = time.time()
+            network_events.append(evt)
+            if len(network_events) > 50:
+                network_events.pop(0)
         elif msg.get("type") == "blockage":
             fleet_state.setdefault("_events", []).append(
                 {"kind": "blockage", "cell": msg["cell"], "t": time.time()})
@@ -88,7 +99,7 @@ def udp_listener(port: int):
 async def broadcast_state():
     robots = [v for k, v in fleet_state.items() if k != "_events"]
     events = fleet_state.get("_events", [])
-    payload = json.dumps({"robots": robots, "events": events})
+    payload = json.dumps({"robots": robots, "events": events, "network_events": network_events})
     dead = []
     for ws in connections:
         try:
