@@ -244,7 +244,7 @@ class RobotAgent:
             reserved = dict(reserved) if reserved else {}
             for cell, expiry in self.avoid_until.items():
                 if expiry > self.t and cell != goal:  # never blacklist the goal itself
-                    for dt in range(0, AVOID_WINDOW):
+                    for dt in range(400):
                         reserved.setdefault((cell, self.t + dt), self.robot_id + "#avoid")
         self.path = astar(self.wmap, self.pos, goal, reserved,
                             start_t=self.t, self_id=self.robot_id)
@@ -404,9 +404,12 @@ class RobotAgent:
                         self.send({"type": "nudge", "target": blocker, "from": self.robot_id})
                         self.display_status = "ASKING TO MOVE"
                 
-                if self.cooperative and self.wait_ticks > STARVATION_WAIT_LIMIT:
+                # Break symmetry in head-to-head deadlocks: lower priority (higher index)
+                # robots have a shorter starvation limit, so they yield and back up first!
+                dynamic_starvation_limit = 10 + (5 - self.priority_base) * 4
+                if self.cooperative and self.wait_ticks > dynamic_starvation_limit:
                     # break the deadlock: force a fresh plan (often finds a
-                    # side-step around the blocking robot instead of just waiting)
+                    # detour if the previous path is hopelessly congested)
                     self.avoid_until[next_cell] = self.t + AVOID_WINDOW
                     self.path = []
                     self.wait_ticks = 0
