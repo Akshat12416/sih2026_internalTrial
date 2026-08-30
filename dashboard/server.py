@@ -162,6 +162,21 @@ async def clear_tasks():
     sock.close()
     return {"status": "ok"}
 
+@app.post("/api/reset")
+async def reset_fleet():
+    global network_events, fleet_state
+    network_events.clear()
+    fleet_state.clear()
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    payload = json.dumps({"type": "reset"}).encode("utf-8")
+    for port in range(9500, 9520):
+        try:
+            sock.sendto(payload, ("127.0.0.1", port))
+        except OSError:
+            pass
+    sock.close()
+    return {"status": "ok"}
+
 @app.post("/api/spawn-task")
 async def spawn_task(req: TaskRequest = None):
     import sys

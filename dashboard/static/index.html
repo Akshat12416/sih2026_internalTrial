@@ -196,11 +196,12 @@
             <div id="queue-status" style="font-size:12px; color:var(--text); padding:6px; background:var(--panel-2); border-radius:4px; border:1px solid var(--line); text-align:center;">Click map to add tasks (0 queued)</div>
             <div style="display:flex; gap:10px;">
                 <button id="btn-batch" style="flex:2; padding:6px 12px; background:var(--accent); color:var(--bg); border:none; border-radius:4px; font-family:inherit; font-weight:bold; cursor:pointer;">Send Queue</button>
-                <button id="btn-clear" style="flex:1; padding:6px 12px; background:var(--danger); color:var(--bg); border:none; border-radius:4px; font-family:inherit; font-weight:bold; cursor:pointer;">Clear</button>
+                <button id="btn-clear" style="flex:1.5; padding:6px 12px; background:var(--warn); color:var(--bg); border:none; border-radius:4px; font-family:inherit; font-weight:bold; cursor:pointer;">Clear Tasks</button>
             </div>
         </div>
         <div style="display:flex; gap:10px; margin-bottom: 15px;">
-            <button id="btn-auto" style="flex:1; padding:8px; background:var(--panel-2); color:var(--text); border:1px solid var(--line); border-radius:4px; font-family:inherit; cursor:pointer;">Auto Random Tasks: OFF</button>
+            <button id="btn-auto" style="flex:2; padding:8px; background:var(--panel-2); color:var(--text); border:1px solid var(--line); border-radius:4px; font-family:inherit; cursor:pointer;">Auto Random Tasks: OFF</button>
+            <button id="btn-reset" style="flex:1; padding:8px; background:var(--danger); color:var(--bg); border:none; border-radius:4px; font-family:inherit; font-weight:bold; cursor:pointer;">Reset Fleet</button>
         </div>
         <div style="font-size:11px; margin-bottom:8px; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px;">Simulation Benchmark</div>
         <div style="display:flex; gap:10px; margin-bottom: 10px;">
@@ -710,6 +711,16 @@ document.getElementById('btn-clear').onclick = async () => {
     updateQueueUI();
     // also tell the mesh to wipe all unassigned tasks!
     await fetch('/api/clear-tasks', { method: 'POST' });
+};
+
+document.getElementById('btn-reset').onclick = async () => {
+    taskQueue = [];
+    currentPickup = null;
+    clickState = 'SELECT_PICKUP';
+    updateQueueUI();
+    document.getElementById('event-log').innerHTML = '';
+    document.getElementById('net-log').innerHTML = '';
+    await fetch('/api/reset', { method: 'POST' });
 };
 
 document.getElementById('btn-batch').onclick = async () => {

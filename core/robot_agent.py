@@ -86,6 +86,24 @@ class RobotAgent:
 
     def __post_init__(self):
         self.book = ReservationBook(self.robot_id)
+        self.start_pos = self.pos
+        
+    def reset(self):
+        self.pos = self.start_pos
+        self.state = "IDLE"
+        self.battery = 100.0
+        self.path = []
+        self.current_task = None
+        self.known_tasks.clear()
+        self.open_bids.clear()
+        self.queued_tasks.clear()
+        self.wait_ticks = 0
+        self.completed_tasks = 0
+        self.total_wait_ticks = 0
+        self.avoid_until.clear()
+        self.nudged = False
+        self.display_status = ""
+        self.book = ReservationBook(self.robot_id)
 
     # ---------------------------------------------------------------- #
     # NETWORK: called by transport layer whenever a message arrives
@@ -117,6 +135,13 @@ class RobotAgent:
             # clear all known open tasks from the network
             self.known_tasks.clear()
             self.open_bids.clear()
+            self.queued_tasks.clear()
+            self.current_task = None
+            if self.state != "CHARGING" and self.state != "EN_ROUTE_TO_CHARGE":
+                self.state = "IDLE"
+            self.path = []
+        elif kind == "reset":
+            self.reset()
         elif kind == "nudge":
             if msg.get("target") == self.robot_id and self.state == "IDLE":
                 # Ignore impatient repeated nudges if we are already in the process of making way!
