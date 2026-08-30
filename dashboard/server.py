@@ -107,14 +107,27 @@ class AutoTaskRequest(BaseModel):
 
 auto_tasks_active = False
 
+class TaskRequest(BaseModel):
+    pickup: list = None
+    dropoff: list = None
+
 @app.post("/api/spawn-task")
-async def spawn_task():
+async def spawn_task(req: TaskRequest = None):
     import sys
     sys.path.insert(0, str(Path(__file__).parent.parent))
     from core.layouts import demo_warehouse
     wmap = demo_warehouse()
-    pickup = random.choice(wmap.pickup_points)
-    dropoff = random.choice(wmap.dropoff_points)
+    
+    if req and req.pickup:
+        pickup = tuple(req.pickup)
+    else:
+        pickup = random.choice(wmap.pickup_points)
+        
+    if req and req.dropoff:
+        dropoff = tuple(req.dropoff)
+    else:
+        dropoff = random.choice(wmap.dropoff_points)
+        
     tid = f"UI-{int(time.time()*1000)}"
     msg = {
         "type": "task_announce",
