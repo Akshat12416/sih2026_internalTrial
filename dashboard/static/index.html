@@ -149,6 +149,7 @@
       <div class="tabs">
         <div class="tab active" data-target="view-map">LIVE MAP</div>
         <div class="tab" data-target="view-telemetry">SWARM TELEMETRY</div>
+        <div class="tab" data-target="view-logs">ROBOT LOGS</div>
       </div>
       
       <div id="view-map" class="view active">
@@ -160,6 +161,13 @@
           > MESH PROTOCOL ANALYZER / LISTENING ON UDP:9600...
         </div>
         <div class="net-log" id="net-log"></div>
+      </div>
+      
+      <div id="view-logs" class="view">
+        <div style="padding: 10px 20px; background: #050709; border-bottom: 1px solid #1c2733; font-size: 11px; color: #5f6c7a; letter-spacing: 1px;">
+          > ROBOT CONVERSATION INTERCEPT / LISTENING...
+        </div>
+        <div class="net-log" id="event-log"></div>
       </div>
     </div>
     
@@ -367,11 +375,42 @@ function pillClass(state){
 }
 function battClass(b){ if(b<20) return 'low'; if(b<50) return 'mid'; return ''; }
 
+function logRobotEvent(robotId, status, t) {
+    const el = document.getElementById('event-log');
+    const msg = document.createElement('div');
+    msg.style.marginBottom = '6px';
+    
+    let color = '#dfe7ee';
+    let text = status;
+    if (status === 'ASKING TO MOVE') { color = '#ffcf6b'; text = 'Hey, can you please make way?'; }
+    if (status === 'MAKING WAY') { color = '#37f0b0'; text = 'Sure, stepping aside!'; }
+    if (status === 'WAITING') { color = '#ffb454'; text = 'Blocked, waiting for path to clear...'; }
+    if (status === 'RECALCULATING') { color = '#ff5c72'; text = 'Path blocked for too long. Recalculating detour!'; }
+    if (status === 'YIELDING') { color = '#a78bfa'; text = 'Yielding to higher priority robot.'; }
+
+    const tStr = Math.floor(t || 0).toString().padStart(4, '0');
+    
+    msg.innerHTML = `<span style="color:#5f6c7a">[T=${tStr}]</span> <span style="color:${color}; font-weight:bold">[${robotId}]</span> <span style="color:${color}">${text}</span>`;
+    el.appendChild(msg);
+    
+    while(el.children.length > 50) el.removeChild(el.firstChild);
+    el.scrollTop = el.scrollHeight;
+}
+
+let prevStatus = {};
+
 function renderFleet(list){
   const el = document.getElementById('fleet');
   el.innerHTML = '';
   list.sort((a,b)=>a.robot_id.localeCompare(b.robot_id)).forEach((rb, idx)=>{
     robots[rb.robot_id] = {r: rb.pos[0], c: rb.pos[1], idx};
+    
+    let prev = prevStatus[rb.robot_id];
+    if (rb.display_status && rb.display_status !== prev) {
+        logRobotEvent(rb.robot_id, rb.display_status, rb.t);
+    }
+    prevStatus[rb.robot_id] = rb.display_status;
+    
     const card = document.createElement('div');
     card.className = 'robot-card';
     card.style.borderLeft = `3px solid ${colorFor(rb.robot_id, idx)}`;
