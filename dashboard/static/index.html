@@ -102,9 +102,14 @@
     <aside>
       <div class="aside-head">Mission Control</div>
       <div class="controls" style="padding: 14px 18px; border-bottom: 1px solid var(--line-soft);">
+        <div style="font-size:11px; margin-bottom:8px; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px;">Custom Task (Row, Col)</div>
         <div style="display:flex; gap:10px; margin-bottom: 15px;">
-            <button id="btn-spawn" style="flex:1; padding:8px; background:var(--accent); color:var(--bg); border:none; border-radius:4px; font-family:inherit; font-weight:bold; cursor:pointer;">Spawn Task</button>
-            <button id="btn-auto" style="flex:1; padding:8px; background:var(--panel-2); color:var(--text); border:1px solid var(--line); border-radius:4px; font-family:inherit; cursor:pointer;">Auto: OFF</button>
+            <input type="text" id="task-pickup" placeholder="e.g. 0,2" title="Pickup (r,c)" style="flex:1; padding:6px; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:4px; font-family:inherit; font-size:12px;" />
+            <input type="text" id="task-dropoff" placeholder="e.g. 10,2" title="Dropoff (r,c)" style="flex:1; padding:6px; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:4px; font-family:inherit; font-size:12px;" />
+            <button id="btn-spawn" style="padding:6px 12px; background:var(--accent); color:var(--bg); border:none; border-radius:4px; font-family:inherit; font-weight:bold; cursor:pointer;">Send</button>
+        </div>
+        <div style="display:flex; gap:10px; margin-bottom: 15px;">
+            <button id="btn-auto" style="flex:1; padding:8px; background:var(--panel-2); color:var(--text); border:1px solid var(--line); border-radius:4px; font-family:inherit; cursor:pointer;">Auto Random Tasks: OFF</button>
         </div>
         <div style="font-size:11px; margin-bottom:8px; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px;">Simulation Benchmark</div>
         <div style="display:flex; gap:10px; margin-bottom: 10px;">
@@ -259,7 +264,23 @@ loadWarehouse().then(()=>{ draw(); connect(); });
 
 let autoTasks = false;
 document.getElementById('btn-spawn').onclick = async () => {
-  await fetch('/api/spawn-task', {method: 'POST'});
+  const pInput = document.getElementById('task-pickup').value;
+  const dInput = document.getElementById('task-dropoff').value;
+  let body = {};
+  if(pInput.trim()) {
+      body.pickup = pInput.split(',').map(s=>parseInt(s.trim()));
+  }
+  if(dInput.trim()) {
+      body.dropoff = dInput.split(',').map(s=>parseInt(s.trim()));
+  }
+  
+  await fetch('/api/spawn-task', {
+      method: 'POST', 
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+  });
+  document.getElementById('task-pickup').value = '';
+  document.getElementById('task-dropoff').value = '';
 };
 document.getElementById('btn-auto').onclick = async () => {
   autoTasks = !autoTasks;
