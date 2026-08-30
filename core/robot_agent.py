@@ -270,13 +270,22 @@ class RobotAgent:
             # it -- otherwise a second robot arriving at the same shared
             # resource would have nowhere to physically go.
             if self._on_resource_cell():
+                just_planned_idle = False
                 if not self.path or len(self.path) < 2:
                     target = self._nearest_staging_cell()
                     if target:
                         reserved = self.book.as_reserved_table() if self.cooperative else None
                         self.path = astar(self.wmap, self.pos, target, reserved,
                                             start_t=self.t, self_id=self.robot_id)
+                        just_planned_idle = True
                 if self.path and len(self.path) >= 2:
+                    if just_planned_idle:
+                        horizon = [self.pos] + self.path[1:PLAN_HORIZON]
+                        self.send({"type": "intent", "robot_id": self.robot_id,
+                                    "priority": self.priority_base, "path": horizon,
+                                    "start_t": self.t})
+                        return
+                    
                     next_cell = self.path[1]
                     can_go = resolve_conflict(self.robot_id, self.priority_base,
                                                 next_cell, self.pos, self.book)
@@ -302,8 +311,10 @@ class RobotAgent:
             return
 
         # -- (re)plan if we have no path --------------------------------
+        just_planned = False
         if not self.path or len(self.path) < 2:
             self._replan()
+            just_planned = True
 
         if not self.path or len(self.path) < 2:
             # boxed in -- broadcast that we're stationary and try again next tick
@@ -317,25 +328,29 @@ class RobotAgent:
         next_cell = self.path[1]
         eff_priority = (apply_aging(self.wait_ticks, self.priority_base)
                          if self.cooperative else self.priority_base)
-        can_go = resolve_conflict(self.robot_id, eff_priority, next_cell,
-                                    self.pos, self.book)
-
-        if can_go and not self.wmap.is_blocked(next_cell, now=self.t):
-            self.pos = next_cell
-            self.path = self.path[1:]
-            self.battery = max(0.0, self.battery - BATTERY_DRAIN_PER_MOVE)
-            self.wait_ticks = 0
-            moved = True
-        else:
-            self.wait_ticks += 1
-            self.total_wait_ticks += 1
+        
+        if just_planned:
             moved = False
-            if self.cooperative and self.wait_ticks > STARVATION_WAIT_LIMIT:
-                # break the deadlock: force a fresh plan (often finds a
-                # side-step around the blocking robot instead of just waiting)
-                self.avoid_until[next_cell] = self.t + AVOID_WINDOW
-                self.path = []
+        else:
+            can_go = resolve_conflict(self.robot_id, eff_priority, next_cell,
+                                        self.pos, self.book)
+    
+            if can_go and not self.wmap.is_blocked(next_cell, now=self.t):
+                self.pos = next_cell
+                self.path = self.path[1:]
+                self.battery = max(0.0, self.battery - BATTERY_DRAIN_PER_MOVE)
                 self.wait_ticks = 0
+                moved = True
+            else:
+                self.wait_ticks += 1
+                self.total_wait_ticks += 1
+                moved = False
+                if self.cooperative and self.wait_ticks > STARVATION_WAIT_LIMIT:
+                    # break the deadlock: force a fresh plan (often finds a
+                    # side-step around the blocking robot instead of just waiting)
+                    self.avoid_until[next_cell] = self.t + AVOID_WINDOW
+                    self.path = []
+                    self.wait_ticks = 0
             # NOTE: baseline robots intentionally do nothing else here --
             # they just keep re-checking the same static path next tick,
             # which is exactly what makes "stop-and-wait" slow at busy
