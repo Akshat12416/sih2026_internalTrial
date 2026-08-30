@@ -29,7 +29,7 @@ LOW_BATTERY = 20.0
 FULL_BATTERY = 100.0
 BATTERY_DRAIN_PER_MOVE = 0.35
 BATTERY_CHARGE_PER_TICK = 8.0
-STARVATION_WAIT_LIMIT = 6
+STARVATION_WAIT_LIMIT = 10
 AVOID_WINDOW = 15          # ticks a just-contested cell is treated as a
                             # soft no-go by THIS robot's own planner after a
                             # starvation-triggered replan -- without this, a
@@ -118,7 +118,9 @@ class RobotAgent:
             self.open_bids.clear()
         elif kind == "nudge":
             if msg.get("target") == self.robot_id and self.state == "IDLE":
-                self.nudged = True
+                # Ignore impatient repeated nudges if we are already in the process of making way!
+                if not self.path or len(self.path) < 2:
+                    self.nudged = True
 
     # ---------------------------------------------------------------- #
     # TASK ALLOCATION -- decentralized Contract Net Protocol
