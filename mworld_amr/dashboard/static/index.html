@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>M-WORLD // FLEET OPS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#090c10;
+    --panel:#0e131a;
+    --panel-2:#121924;
+    --line:#1c2733;
+    --line-soft:#151d27;
+    --shelf:#1a222c;
+    --text:#dfe7ee;
+    --text-dim:#5f6c7a;
+    --accent:#37f0b0;       /* live / moving */
+    --accent-dim:#1c6b53;
+    --warn:#ffb454;         /* low battery / waiting */
+    --danger:#ff5c72;       /* blocked */
+    --amber:#ffcf6b;        /* choke points */
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:'JetBrains Mono', monospace;
+    height:100vh; overflow:hidden;
+  }
+  .app{ display:grid; grid-template-rows:auto 1fr; height:100vh; }
+  header{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:18px 28px; border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg, var(--panel), var(--bg));
+  }
+  .brand{ display:flex; align-items:baseline; gap:14px; }
+  .brand .mark{
+    font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:20px;
+    letter-spacing:0.5px; color:var(--text);
+  }
+  .brand .mark span{ color:var(--accent); }
+  .brand .eyebrow{
+    font-size:11px; letter-spacing:2.5px; color:var(--text-dim); text-transform:uppercase;
+  }
+  .status{ display:flex; align-items:center; gap:10px; font-size:12px; color:var(--text-dim); }
+  .dot{ width:8px; height:8px; border-radius:50%; background:var(--accent);
+        box-shadow:0 0 8px var(--accent); animation:pulse 1.6s infinite; }
+  @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:0.35;} }
+
+  main{ display:grid; grid-template-columns:1fr 340px; height:100%; overflow:hidden; }
+  .stage{ position:relative; display:flex; align-items:center; justify-content:center; }
+  canvas{ image-rendering:crisp-edges; }
+
+  aside{
+    border-left:1px solid var(--line); background:var(--panel);
+    display:flex; flex-direction:column; overflow-y:auto;
+  }
+  .aside-head{
+    padding:16px 18px 10px; font-size:11px; letter-spacing:2px; color:var(--text-dim);
+    text-transform:uppercase; border-bottom:1px solid var(--line-soft);
+  }
+  .fleet-list{ padding:10px; display:flex; flex-direction:column; gap:10px; }
+  .robot-card{
+    background:var(--panel-2); border:1px solid var(--line); border-radius:6px;
+    padding:12px 14px; position:relative; overflow:hidden;
+  }
+  .robot-card .row1{ display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;}
+  .robot-id{ font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:14px; }
+  .pill{
+    font-size:10px; letter-spacing:1px; padding:3px 8px; border-radius:20px;
+    text-transform:uppercase; border:1px solid currentColor;
+  }
+  .pill.idle{ color:var(--text-dim); }
+  .pill.moving{ color:var(--accent); }
+  .pill.wait{ color:var(--warn); }
+  .pill.charge{ color:#7fb0ff; }
+  .meta{ display:flex; justify-content:space-between; font-size:11px; color:var(--text-dim); margin-bottom:6px;}
+  .batt-track{ height:5px; background:var(--line); border-radius:4px; overflow:hidden; }
+  .batt-fill{ height:100%; background:var(--accent); transition:width .3s ease; }
+  .batt-fill.low{ background:var(--danger); }
+  .batt-fill.mid{ background:var(--warn); }
+
+  .legend{
+    padding:14px 18px; border-top:1px solid var(--line-soft); font-size:11px;
+    color:var(--text-dim); display:flex; flex-direction:column; gap:8px;
+  }
+  .legend .item{ display:flex; align-items:center; gap:8px; }
+  .swatch{ width:10px; height:10px; border-radius:3px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand">
+      <div class="mark">M-WORLD <span>// FLEET OPS</span></div>
+      <div class="eyebrow">Decentralized Edge Coordination — No Central Server</div>
+    </div>
+    <div class="status"><span class="dot"></span><span id="conn">connecting…</span></div>
+  </header>
+  <main>
+    <div class="stage"><canvas id="grid" width="900" height="660"></canvas></div>
+    <aside>
+      <div class="aside-head">Live Fleet Telemetry</div>
+      <div class="fleet-list" id="fleet"></div>
+      <div class="legend">
+        <div class="item"><span class="swatch" style="background:var(--amber)"></span> Choke point (1-wide aisle)</div>
+        <div class="item"><span class="swatch" style="background:var(--accent)"></span> Robot — moving</div>
+        <div class="item"><span class="swatch" style="background:var(--warn)"></span> Robot — waiting / yielding</div>
+        <div class="item"><span class="swatch" style="background:var(--danger)"></span> Blocked cell</div>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<script>
+const canvas = document.getElementById('grid');
+const ctx = canvas.getContext('2d');
+let wmap = null, cell = 40, offX = 0, offY = 0;
+let robots = {};       // id -> {target pos, rendered pos, ...}
+const robotColors = ['#37f0b0', '#7fb0ff', '#ffcf6b', '#ff8fd6', '#a78bfa', '#ff9b6b'];
+
+async function loadWarehouse(){
+  const res = await fetch('/warehouse');
+  wmap = await res.json();
+  const rows = wmap.grid.length, cols = wmap.grid[0].length;
+  cell = Math.min((canvas.width-40)/cols, (canvas.height-40)/rows);
+  offX = (canvas.width - cols*cell)/2;
+  offY = (canvas.height - rows*cell)/2;
+  draw();
+}
+
+function cellCenter(r,c){
+  return [offX + c*cell + cell/2, offY + r*cell + cell/2];
+}
+
+function drawStatic(){
+  ctx.fillStyle = '#090c10';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  if(!wmap) return;
+  const rows = wmap.grid.length, cols = wmap.grid[0].length;
+
+  // faint blueprint grid
+  ctx.strokeStyle = '#151d27';
+  ctx.lineWidth = 1;
+  for(let r=0;r<=rows;r++){
+    ctx.beginPath(); ctx.moveTo(offX, offY+r*cell); ctx.lineTo(offX+cols*cell, offY+r*cell); ctx.stroke();
+  }
+  for(let c=0;c<=cols;c++){
+    ctx.beginPath(); ctx.moveTo(offX+c*cell, offY); ctx.lineTo(offX+c*cell, offY+rows*cell); ctx.stroke();
+  }
+
+  for(let r=0;r<rows;r++){
+    for(let c=0;c<cols;c++){
+      const v = wmap.grid[r][c];
+      const x = offX+c*cell, y = offY+r*cell;
+      if(v===1){ ctx.fillStyle = '#1a222c'; ctx.fillRect(x+2,y+2,cell-4,cell-4); }
+    }
+  }
+  const markPoint = (cells, color, label) => {
+    ctx.fillStyle = color;
+    cells.forEach(([r,c])=>{
+      const [cx,cy] = cellCenter(r,c);
+      ctx.beginPath(); ctx.arc(cx,cy,cell*0.14,0,Math.PI*2); ctx.fill();
+    });
+  };
+  markPoint(wmap.pickup, '#3d9cff', 'P');
+  markPoint(wmap.dropoff, '#ff8fd6', 'D');
+  markPoint(wmap.charge, '#7fffb0', 'C');
+
+  ctx.strokeStyle = '#ffcf6b55';
+  wmap.choke_points.forEach(([r,c])=>{
+    const [cx,cy]=cellCenter(r,c);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy-cell*0.3); ctx.lineTo(cx+cell*0.3, cy);
+    ctx.lineTo(cx, cy+cell*0.3); ctx.lineTo(cx-cell*0.3, cy); ctx.closePath();
+    ctx.stroke();
+  });
+}
+
+function colorFor(id, idx){ return robotColors[idx % robotColors.length]; }
+
+function draw(){
+  drawStatic();
+  let i=0;
+  for(const id in robots){
+    const rb = robots[id];
+    const [cx, cy] = cellCenter(rb.r, rb.c);
+    const col = colorFor(id, rb.idx);
+    // glow
+    const grad = ctx.createRadialGradient(cx,cy,0,cx,cy,cell*0.9);
+    grad.addColorStop(0, col+'55'); grad.addColorStop(1, col+'00');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(cx,cy,cell*0.9,0,Math.PI*2); ctx.fill();
+
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.arc(cx,cy,cell*0.28,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#0a0e13';
+    ctx.font = `${Math.floor(cell*0.28)}px 'JetBrains Mono'`;
+    ctx.textAlign = 'center'; ctx.textBaseline='middle';
+    ctx.fillText(id.replace(/[^0-9]/g,''), cx, cy+1);
+    i++;
+  }
+  requestAnimationFrame(draw);
+}
+
+function pillClass(state){
+  if(state==='CHARGING'||state==='EN_ROUTE_TO_CHARGE') return 'charge';
+  if(state==='IDLE') return 'idle';
+  return 'moving';
+}
+function battClass(b){ if(b<20) return 'low'; if(b<50) return 'mid'; return ''; }
+
+function renderFleet(list){
+  const el = document.getElementById('fleet');
+  el.innerHTML = '';
+  list.sort((a,b)=>a.robot_id.localeCompare(b.robot_id)).forEach((rb, idx)=>{
+    robots[rb.robot_id] = {r: rb.pos[0], c: rb.pos[1], idx};
+    const card = document.createElement('div');
+    card.className = 'robot-card';
+    card.style.borderLeft = `3px solid ${colorFor(rb.robot_id, idx)}`;
+    card.innerHTML = `
+      <div class="row1">
+        <span class="robot-id">${rb.robot_id}</span>
+        <span class="pill ${pillClass(rb.state)}">${rb.state.replaceAll('_',' ')}</span>
+      </div>
+      <div class="meta"><span>pos (${rb.pos[0]},${rb.pos[1]})</span><span>tasks: ${rb.completed}</span></div>
+      <div class="batt-track"><div class="batt-fill ${battClass(rb.battery)}" style="width:${rb.battery}%"></div></div>
+    `;
+    el.appendChild(card);
+  });
+}
+
+function connect(){
+  const ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen = ()=> document.getElementById('conn').textContent = 'mesh online';
+  ws.onclose = ()=> { document.getElementById('conn').textContent = 'disconnected — retrying'; setTimeout(connect, 1500); };
+  ws.onmessage = (ev)=>{
+    const data = JSON.parse(ev.data);
+    if(data.robots) renderFleet(data.robots);
+  };
+}
+
+loadWarehouse().then(()=>{ draw(); connect(); });
+</script>
+</body>
+</html>
