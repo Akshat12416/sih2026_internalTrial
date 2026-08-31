@@ -1,4 +1,4 @@
-# M-World AMR Fleet — Decentralized Edge-AI Coordination
+# BJP AMR Fleet — Decentralized Edge-AI Coordination
 
 A working, runnable answer to *"Edge-AI Based Distributed Fleet Coordination
 for AMRs in Smart Warehouses."* No central server ever tells a robot what to
