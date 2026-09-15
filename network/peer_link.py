@@ -53,7 +53,11 @@ class UDPPeerLink:
         while self._running:
             try:
                 data, _addr = self._sock.recvfrom(65536)
-            except socket.timeout:
+            except (socket.timeout, ConnectionResetError):
+                # Windows reports "port unreachable" from an earlier sendto() (e.g. a peer
+                # not started yet) as ConnectionResetError on the NEXT recv. It's harmless
+                # for UDP -- treating it as fatal killed this thread and left the robot
+                # deaf forever, so only the last-launched robot ever heard any tasks.
                 continue
             except OSError:
                 break
