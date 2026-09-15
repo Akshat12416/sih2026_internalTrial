@@ -33,6 +33,8 @@ Cell = Tuple[int, int]
 FREE, SHELF, PICKUP, DROPOFF, CHARGE = 0, 1, 2, 3, 4
 
 
+from core import config
+
 # --------------------------------------------------------------------------- #
 # 1. WAREHOUSE MAP
 # --------------------------------------------------------------------------- #
@@ -42,7 +44,7 @@ class WarehouseMap:
     Dynamic blockages (a dropped pallet, a jammed aisle) are layered on top
     at runtime and propagate via broadcasts, NOT via this static grid."""
 
-    def __init__(self, grid: List[List[int]]):
+    def __init__(self, grid: List[List[int]], directed: Optional[bool] = None):
         self.grid = grid
         self.rows = len(grid)
         self.cols = len(grid[0])
@@ -50,8 +52,10 @@ class WarehouseMap:
         self.dropoff_points = self._cells_of(DROPOFF)
         self.charge_points = self._cells_of(CHARGE)
         self.choke_points = self._detect_choke_points()
+        self._detect_vertical_aisles()
         # dynamic blockages reported live by robots (aisle collapse, spill, etc.)
         self.dynamic_blocks: Dict[Cell, float] = {}  # cell -> expiry timestamp
+        self.directed = directed if directed is not None else config.USE_DIRECTED_GRAPH
 
     def _cells_of(self, kind: int) -> List[Cell]:
         return [(r, c) for r in range(self.rows) for c in range(self.cols)
@@ -103,7 +107,29 @@ class WarehouseMap:
     def neighbours(self, cell: Cell) -> List[Cell]:
         r, c = cell
         cand = [(r + 1, c), (r - 1, c), (r, c + 1), (r, c - 1)]
-        return [n for n in cand if not self.is_blocked(n)]
+        valid = [n for n in cand if not self.is_blocked(n)]
+        if not self.directed:
+            return valid
+
+        # Directed constraints for single-width vertical storage aisles (Decision C1).
+        # Aisle columns alternate direction left to right: northbound, southbound,
+        # northbound, ... Cross-corridors and perimeter lanes stay two-way.
+        res = []
+        for nr, nc in valid:
+            if c == nc and ((r, c) in self.aisle_cells or (nr, nc) in self.aisle_cells):
+                if (nr - r) != self.aisle_dir[c]:
+                    continue  # wrong way down a one-way aisle
+            res.append((nr, nc))
+        return res
+
+    def _detect_vertical_aisles(self):
+        """Aisle cell = free cell with shelves directly left AND right (a
+        single-robot-wide vertical lane). Works for any generated layout."""
+        self.aisle_cells = {(r, c) for r in range(self.rows) for c in range(1, self.cols - 1)
+                            if self.grid[r][c] != SHELF
+                            and self.grid[r][c - 1] == SHELF and self.grid[r][c + 1] == SHELF}
+        cols = sorted({c for _, c in self.aisle_cells})
+        self.aisle_dir = {c: (-1 if i % 2 == 0 else 1) for i, c in enumerate(cols)}  # -1 = north
 
 
 # --------------------------------------------------------------------------- #
@@ -113,19 +139,35 @@ def manhattan(a: Cell, b: Cell) -> int:
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
 
+def build_congestion_heatmap(book: ReservationBook) -> Dict[Cell, float]:
+    """Builds a traffic congestion heatmap from peer broadcast intents (L5 routing layer).
+    Cells with more planned future visits receive higher congestion weight."""
+    heatmap: Dict[Cell, float] = {}
+    for intent in book.peers.values():
+        for step_idx, cell in enumerate(intent.path):
+            # Earlier steps in the horizon carry higher weight
+            weight = 1.0 / (1.0 + 0.25 * step_idx)
+            heatmap[cell] = heatmap.get(cell, 0.0) + weight
+    return heatmap
+
+
 def astar(wmap: WarehouseMap, start: Cell, goal: Cell,
           reserved: Optional[Dict[Tuple[Cell, int], str]] = None,
-          start_t: int = 0, self_id: str = "") -> List[Cell]:
+          start_t: int = 0, self_id: str = "",
+          congestion_map: Optional[Dict[Cell, float]] = None,
+          congestion_weight: float = 2.5) -> List[Cell]:
     """Grid A*. If `reserved` is supplied (a dict of (cell, time_step) ->
     robot_id) the search also avoids stepping into a cell at a timestep
-    another (higher-or-equal priority) robot has claimed -- this is the
-    'cooperative A*' trick that lets many independent planners avoid each
-    other without ever synchronizing on a single global plan."""
+    another (higher-or-equal priority) robot has claimed.
+    If `congestion_map` is supplied (or USE_CONGESTION_COST is on), edges are
+    reweighted to steer robots along shortest low-congestion routes."""
     reserved = reserved or {}
-    open_heap = [(manhattan(start, goal), 0, start, start_t)]
+    open_heap = [(float(manhattan(start, goal)), 0.0, start, start_t)]
     came_from: Dict[Tuple[Cell, int], Tuple[Cell, int]] = {}
-    g_score = {(start, start_t): 0}
+    g_score = {(start, start_t): 0.0}
     visited = set()
+
+    use_congestion = config.USE_CONGESTION_COST or (congestion_map is not None)
 
     while open_heap:
         _, g, cur, t = heapq.heappop(open_heap)
@@ -141,7 +183,10 @@ def astar(wmap: WarehouseMap, start: Cell, goal: Cell,
             key = (nxt, nt)
             if key in reserved and reserved[key] != self_id:
                 continue  # someone else claims that cell at that time
-            ng = g + 1
+            step_cost = 1.0
+            if use_congestion and congestion_map and nxt != cur:
+                step_cost += congestion_weight * congestion_map.get(nxt, 0.0)
+            ng = g + step_cost
             if g_score.get(key, 1e9) > ng:
                 g_score[key] = ng
                 came_from[key] = (cur, t)
@@ -171,6 +216,9 @@ class PeerIntent:
     path: List[Cell]       # short-horizon planned path
     start_t: int
     received_at: float = field(default_factory=time.time)
+    # Optional L3/L4 coordination fields (absent from older / baseline senders):
+    goal: Optional[Cell] = None
+    rank: Optional[tuple] = None   # PIBT priority key as broadcast; lower = higher priority
 
 
 class ReservationBook:
@@ -211,6 +259,34 @@ class ReservationBook:
 # --------------------------------------------------------------------------- #
 # 4. CONFLICT / DEADLOCK RESOLUTION (the "traffic rules")
 # --------------------------------------------------------------------------- #
+def l2_safety_shield(self_id: str, next_cell: Cell, cur_cell: Cell,
+                     book: ReservationBook, wmap: WarehouseMap,
+                     self_rank: Optional[tuple] = None) -> bool:
+    """L2 Local Motion & Safety Shield (Deterministic, has final veto).
+    Checks every proposed move against locally received peer broadcasts only,
+    regardless of what L4 (PIBT) or higher layers propose.
+    Returns True if the move to `next_cell` is safe, False to veto.
+
+      1. Occupancy: never enter a cell a peer currently occupies.
+      2. Race: if a peer with a better broadcast rank also intends to enter the
+         same empty cell, yield. Both robots compare the SAME two broadcast
+         ranks, so exactly one proceeds even without synchronized clocks.
+    """
+    if wmap.is_blocked(next_cell):
+        return False
+    if next_cell == cur_cell:
+        return True
+    for intent in book.peers.values():
+        if intent.path and intent.path[0] == next_cell:
+            return False
+    if self_rank is not None:
+        for intent in book.peers.values():
+            if (len(intent.path) >= 2 and intent.path[1] == next_cell
+                    and intent.rank is not None and tuple(intent.rank) < tuple(self_rank)):
+                return False
+    return True
+
+
 def resolve_conflict(self_id: str, self_priority: int, self_next: Cell,
                       self_cur: Cell, book: ReservationBook) -> bool:
     """Returns True if THIS robot should proceed to `self_next` this tick,

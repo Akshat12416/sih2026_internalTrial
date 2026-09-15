@@ -76,7 +76,8 @@ def udp_listener(port: int):
         except Exception:
             continue
         if msg.get("type") == "status":
-            fleet_state[msg["robot_id"]] = msg
+            prev = fleet_state.get(msg["robot_id"], {})  # keep last intent, status packets don't carry it
+            fleet_state[msg["robot_id"]] = {**msg, "intent": prev.get("intent"), "priority": prev.get("priority")}
         elif msg.get("type") == "intent":
             if msg["robot_id"] in fleet_state:
                 fleet_state[msg["robot_id"]]["intent"] = msg["path"]
@@ -235,8 +236,11 @@ async def run_benchmark(req: BenchmarkRequest):
     wmap = demo_warehouse()
     seed = 42
     schedule = make_task_schedule(req.tasks, seed, wmap)
-    coop = run(req.robots, schedule, cooperative=True, max_ticks=2500, seed=seed)
-    base = run(req.robots, schedule, cooperative=False, max_ticks=2500, seed=seed)
+    # full layered stack (C1-C6) vs plain stop-and-wait with no layers
+    coop = run(req.robots, schedule, cooperative=True, max_ticks=2500, seed=seed, directed=True,
+               use_pibt=True, use_wfg=True, use_congestion=True, use_dstar=True, use_batching=True)
+    base = run(req.robots, schedule, cooperative=False, max_ticks=2500, seed=seed, directed=False,
+               use_pibt=False, use_wfg=False, use_congestion=False, use_dstar=False, use_batching=False)
     
     reduction = 0
     if base["ticks_to_finish"] > 0:
