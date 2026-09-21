@@ -409,3 +409,40 @@ congestion-aware routing, D* Lite, batching, perception AI, benchmark harness.
 - Live logs have no wall-clock timestamps. 3 cases of a robot entering a cell another had left one tick earlier (normal following) could not be proven sub-tick safe from logs alone.
 - 20+ AMRs are not benchmarked; `layout_for_fleet(20)` produces a 31×63 floor, but it has not been run.
 - Still missing from Session 7: a congestion-level axis and 30 runs per size.
+
+
+### [2026-09-19] L6 / sim / dashboard — Idle-robot home cells, runnable story cases
+**Changed:**
+- `core/robot_agent.py`: `_parking_cell()` now returns the robot's own fixed **home cell**
+  instead of the nearest perimeter lane, with `_is_out_of_the_way()` (not a pickup/dropoff/charger,
+  not the approach square to one, not a single-width aisle) deciding which cells qualify and
+  `_pick_home()` choosing a legal home from the spawn cell.
+- `sim/fast_sim.py`: `START_POSITIONS` is now `[(9,3), (9,5), (9,9), (9,11), (0,0), (0,13)]` — a
+  home line where every cell already qualifies, so no robot is relocated at spawn.
+- `sim/scenarios.py` (new): the story.md cases as data — start/goal cells, blockages and the
+  feature flags each case needs — plus `run_case()`, which runs one headlessly through the same
+  `RobotAgent.step()` and records per-tick frames. Single source of truth for the figures, the
+  dashboard and `python -m sim.scenarios`.
+- `dashboard/`: a Story Cases panel (pick cases, marks appear on the 2D grid and the 3D floor,
+  replay walks the robots in from where they stand via `/api/route` rather than teleporting),
+  `/api/cases`, `/api/run-case`, `/api/fleet-status`, and a banner when no fleet is connected.
+- `live/orchestrator.py`: preflight on the dashboard and robot ports — it now exits with a clear
+  message instead of half-starting behind a stale fleet; `--web-port` / `--observer-port` added.
+- `docs/story_cases/`: figures generated from `sim/scenarios.py`, so a diagram cannot drift from
+  what runs.
+**Why:** The perimeter policy is a relative rule, so the resting formation changed every run and
+robots migrated across the floor between jobs. And the dashboard alone shows an empty floor —
+it only observes the mesh — which read as a broken UI.
+**Result** (demo map, 4 robots, 24 tasks, 5 trials, full stack):
+- Fixed home cells: **212.0 ticks, 0 collisions, 0 timeouts** (nearest-perimeter was 211.2 — no
+  measurable difference). "Stay wherever you finish" was tried and rejected: 731.2 ticks with
+  2/5 timeouts.
+- Idle formation verified stable over 60 ticks: all five robots sit on their home cells.
+- Per-case before/after (`python -m sim.scenarios`): C1 49→15, C2 head-on 47→15, C2 crossing
+  45→15, C3 ring 32→9, C4 congestion 54→19 ticks.
+**Caveats:**
+- On the C3 ring, PIBT alone gives 9 ticks and **WFG alone gives 33 vs 32 for the timeout
+  baseline** — on this scenario WFG contributes nothing measurable; PIBT rotates the ring out
+  before WFG fires.
+- Home cells are tuned for the demo map. Larger `build_warehouse()` floors get a correct but
+  not necessarily tidy home per robot.

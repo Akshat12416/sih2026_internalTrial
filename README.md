@@ -16,11 +16,16 @@ English"** section first — it explains every idea before you touch code.
 pip install fastapi uvicorn websockets
 
 # A) Live demo: 3 independent robot PROCESSES + a browser dashboard
-python -m live.orchestrator --robots 3
+python -m live.orchestrator --robots 3 --full
 # open http://127.0.0.1:8000
+# (this, not `python -m dashboard.server` -- the dashboard only OBSERVES the
+#  mesh, so on its own it shows an empty floor and sends tasks into the void)
 
 # B) Proof of the success criteria: cooperative vs. naive "stop-and-wait"
 python -m sim.fast_sim --robots 4 --tasks 24 --trials 5
+
+# C) Any story.md case, on the map or in the terminal
+python -m sim.scenarios --list          # also: Story Cases panel in the dashboard
 ```
 
 `(A)` is the real thing: three separate OS processes, each with its own UDP

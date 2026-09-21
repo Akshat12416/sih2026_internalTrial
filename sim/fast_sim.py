@@ -28,7 +28,11 @@ from core.robot_agent import RobotAgent, Task
 from core.planner import Cell
 from core import config
 
-START_POSITIONS = [(9, 2), (9, 5), (9, 8), (9, 11), (0, 2), (0, 8)]
+# Home line: four across the bottom staging row, then the top corridor. Every
+# cell here is one an idle robot may sit on forever -- clear of the dropoffs
+# at (10,2)/(10,8) and their approach cells -- so robots park on their spawn
+# and the fleet keeps its formation between jobs.
+START_POSITIONS = [(9, 3), (9, 5), (9, 9), (9, 11), (0, 0), (0, 13)]
 
 
 def start_positions(n: int, wmap) -> List[Cell]:

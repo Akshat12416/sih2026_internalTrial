@@ -47,7 +47,7 @@
         box-shadow:0 0 8px var(--accent); animation:pulse 1.6s infinite; }
   @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:0.35;} }
 
-  main{ display:grid; grid-template-columns:1fr 340px; height:100%; overflow:hidden; }
+  main{ display:grid; grid-template-columns:1fr 390px; height:100%; overflow:hidden; }
   .stage{ position:relative; display:flex; align-items:center; justify-content:center; }
   canvas{ image-rendering:crisp-edges; }
 
@@ -139,7 +139,7 @@
       background: #1c2733; color: #dfe7ee; border-color: #5f6c7a;
   }
   
-  .view-container { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .view-container { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
   .view { flex: 1; display: none; overflow: hidden; }
   .view.active { display: flex; flex-direction: column; }
 
@@ -171,6 +171,13 @@
   </header>
   <main>
     <div class="view-container">
+      <div id="no-fleet" style="display:none; padding:12px 28px; background:#2a1b12; border-bottom:1px solid #6b4a25; color:#ffcf6b; font-size:12px; line-height:1.6;">
+        <b>No fleet connected.</b> This dashboard only <i>observes</i> the mesh — it does not run robots.
+        Start the fleet (it launches this dashboard too):
+        <code style="background:#12161c; padding:2px 7px; border-radius:3px; color:#dfe7ee;">python -m live.orchestrator --robots 3 --full</code>
+        &nbsp;·&nbsp; Story Cases in the side panel work without a fleet.
+      </div>
+      <div id="case-caption" style="display:none; position:absolute; z-index:20; left:50%; transform:translateX(-50%); top:64px; padding:8px 18px; background:rgba(9,12,16,0.92); border:1px solid var(--line); border-radius:6px; font-size:12.5px; color:var(--text); pointer-events:none; white-space:nowrap;"></div>
       <div class="tabs">
         <div class="tab active" data-target="view-3d">3D WAREHOUSE</div>
         <div class="tab" data-target="view-map">2D MAP</div>
@@ -238,7 +245,7 @@
         </div>
       </div>
     </div>
-    
+
     <aside style="overflow-x: hidden;">
       <div class="aside-head">Mission Control</div>
       <div class="controls" style="padding: 14px 18px; border-bottom: 1px solid var(--line-soft);">
@@ -254,6 +261,24 @@
             <button id="btn-auto" style="padding:8px 0; background:var(--panel-2); color:var(--text); border:1px solid var(--line); border-radius:4px; font-family:inherit; cursor:pointer; font-size:11px; white-space:nowrap;">Auto: OFF</button>
             <button id="btn-reset" style="padding:8px 0; background:var(--danger); color:var(--bg); border:none; border-radius:4px; font-family:inherit; font-weight:bold; cursor:pointer; font-size:11px; white-space:nowrap;">Reset Fleet</button>
         </div>
+      </div>
+      <div class="aside-head">Story Cases</div>
+      <div style="padding:12px 16px; border-bottom:1px solid var(--line-soft);">
+        <div style="font-size:11px; color:var(--text-dim); line-height:1.5; margin-bottom:10px;">
+          Tick a case — its start/goal cells mark on the 2D and 3D map straight away. Run replays
+          it on that same map. Runs server-side; your live fleet is untouched.
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
+          <button id="btn-run-cases" style="padding:8px 0; background:var(--accent); color:var(--bg); border:none; border-radius:4px; font-family:inherit; font-weight:bold; cursor:pointer; font-size:11px;">Run selected</button>
+          <button id="btn-stop-cases" style="padding:8px 0; background:var(--panel-2); color:var(--text); border:1px solid var(--line); border-radius:4px; font-family:inherit; cursor:pointer; font-size:11px;">Back to live</button>
+        </div>
+        <div style="display:flex; gap:10px; align-items:center; font-size:10.5px; color:var(--text-dim); margin-bottom:8px; flex-wrap:wrap;">
+          <label style="display:flex; gap:4px; align-items:center; cursor:pointer;"><input type="checkbox" id="case-compare" checked /> before vs after</label>
+          <label style="display:flex; gap:4px; align-items:center;">speed <input type="range" id="case-speed" min="40" max="500" value="180" style="width:70px;" /></label>
+        </div>
+        <div id="case-status" style="font-size:10.5px; color:var(--accent); min-height:14px; margin-bottom:8px;"></div>
+        <div id="case-list" style="max-height:240px; overflow-y:auto; display:flex; flex-direction:column; gap:6px;"></div>
+        <div id="case-results" style="margin-top:10px; font-size:10.5px;"></div>
       </div>
       <div class="aside-head">Live Fleet Telemetry</div>
       <div class="fleet-list" id="fleet"></div>
@@ -271,6 +296,7 @@
 </div>
 
 <script>
+let casePlayback = null;   // set while a story case is replaying on the grid
 const canvas = document.getElementById('grid');
 const ctx = canvas.getContext('2d');
 let wmap = null, cell = 40, offX = 0, offY = 0;
@@ -342,6 +368,7 @@ function colorFor(id){ return robotColors[(parseInt(id.replace(/\D/g, '')) - 1) 
 
 function draw(){
   drawStatic();
+  if(typeof drawCaseOverlay === 'function') drawCaseOverlay();
   // draw queued tasks
   ctx.lineWidth = 2;
   ctx.setLineDash([4, 4]);
@@ -411,7 +438,14 @@ function draw(){
       ctx.fillRect(lx-3, ly-3, 6, 6);
     }
     
-    const [cx, cy] = cellCenter(rb.r, rb.c);
+    // ease the drawn position toward the reported cell so 2D glides like 3D
+    if(rb.rr === undefined || Math.abs(rb.rr - rb.r) > 3 || Math.abs(rb.rc - rb.c) > 3){
+      rb.rr = rb.r; rb.rc = rb.c;
+    } else {
+      rb.rr += (rb.r - rb.rr) * 0.22;
+      rb.rc += (rb.c - rb.rc) * 0.22;
+    }
+    const [cx, cy] = cellCenter(rb.rr, rb.rc);
     const col = colorFor(id, rb.idx);
     // glow
     const grad = ctx.createRadialGradient(cx,cy,0,cx,cy,cell*0.9);
@@ -560,7 +594,8 @@ function renderFleet(list){
   const el = document.getElementById('fleet');
   el.innerHTML = '';
   list.sort((a,b)=>a.robot_id.localeCompare(b.robot_id)).forEach((rb, idx)=>{
-    robots[rb.robot_id] = {...rb, r: rb.pos[0], c: rb.pos[1], idx};
+    const keep = robots[rb.robot_id] || {};
+    robots[rb.robot_id] = {...rb, r: rb.pos[0], c: rb.pos[1], idx, rr: keep.rr, rc: keep.rc};
     
     let prev = prevStatus[rb.robot_id];
     if (rb.display_status && rb.display_status !== prev) {
@@ -669,7 +704,7 @@ function connect(){
   ws.onclose = ()=> { document.getElementById('conn').textContent = 'disconnected — retrying'; setTimeout(connect, 1500); };
   ws.onmessage = (ev)=>{
     const data = JSON.parse(ev.data);
-    if(data.robots) renderFleet(data.robots);
+    if(data.robots && !casePlayback) renderFleet(data.robots);
     
     if(data.network_events) {
       let updated = false;
@@ -744,6 +779,16 @@ function cellClick(r, c) {
 // read-only handle for the 3D view module
 window.dash = {
     colorFor, cellClick,
+    // start/goal cells of whatever cases are ticked, so the 3D floor marks them too
+    get caseMarks() {
+      const f = casePlayback ? casePlayback.def
+              : (typeof focusedCase === 'function' ? focusedCase() : null);
+      return (f ? [f] : []).flatMap(c => [
+        ...c.robots.filter(r => r.goal).map(r => ({cell: r.goal, kind: 'goal'})),
+        ...c.robots.map(r => ({cell: r.start, kind: 'start'})),
+        ...c.blocks.map(b => ({cell: b, kind: 'block'})),
+      ]);
+    },
     get robots() { return robots; },
     get taskQueue() { return taskQueue; },
     get currentPickup() { return currentPickup; },
@@ -781,16 +826,21 @@ document.getElementById('btn-batch').onclick = async () => {
     if(taskQueue.length === 0) return;
     const btn = document.getElementById('btn-batch');
     btn.textContent = '...';
-    await fetch('/api/spawn-batch', {
+    const sent = await fetch('/api/spawn-batch', {
         method: 'POST', 
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({tasks: taskQueue})
     });
+    const info = await sent.json();
     taskQueue = [];
     currentPickup = null;
     clickState = 'SELECT_PICKUP';
     updateQueueUI();
     btn.textContent = 'Send Queue';
+    if(!info.robots_online){
+        document.getElementById('queue-status').textContent =
+          'Sent, but NO robots are listening — start the fleet first';
+    }
 };
 
 document.getElementById('btn-auto').onclick = async () => {
@@ -823,6 +873,257 @@ document.getElementById('btn-bench').onclick = async () => {
     <div style="margin-top:12px; color:var(--text-dim)">Total Deadlocks: ${data.coop.collisions + data.base.collisions}</div>
   `;
 };
+
+// ---------------------------------------------------------------- story cases
+// Pick cases -> their start/goal cells are marked on the 2D grid -> Run replays
+// the recorded frames on that same grid. Nothing here touches the live fleet.
+let caseDefs = [], caseSelected = new Set(), caseStop = false;
+
+function selectedCases(){ return caseDefs.filter(c => caseSelected.has(c.id)); }
+// the case whose points are drawn on the map: the last one ticked
+let caseFocusId = null;
+function focusedCase(){ return caseDefs.find(c => c.id === caseFocusId && caseSelected.has(c.id))
+                            || selectedCases()[0] || null; }
+function caseStatus(txt){ document.getElementById('case-status').textContent = txt; }
+
+async function loadCases(){
+  const res = await fetch('/api/cases');
+  caseDefs = (await res.json()).cases;
+  const el = document.getElementById('case-list');
+  el.innerHTML = '';
+  caseDefs.forEach(c => {
+    const pts = c.robots.map(r => r.goal
+      ? `${r.id}(${r.start[0]},${r.start[1]})→(${r.goal[0]},${r.goal[1]})`
+      : `${r.id}(${r.start[0]},${r.start[1]}) parked`).join('  ');
+    const card = document.createElement('label');
+    card.style.cssText = 'display:block; padding:8px 10px; background:var(--panel-2); border:1px solid var(--line); border-radius:5px; cursor:pointer; font-family:"JetBrains Mono",monospace;';
+    card.innerHTML = `
+      <div style="display:flex; gap:8px; align-items:flex-start;">
+        <input type="checkbox" data-case="${c.id}" style="margin-top:3px;" />
+        <div style="flex:1; min-width:0;">
+          <div style="font-size:11px; color:var(--text);">${c.id} — ${c.title}</div>
+          <div style="font-size:9.5px; color:var(--text-dim); margin-top:2px;">${c.layer} · ${c.modes.join('/')}</div>
+          <div style="font-size:9.5px; color:var(--accent); margin-top:3px; word-break:break-all;">${pts}${c.blocks.length ? ' block ' + c.blocks.map(b=>`(${b[0]},${b[1]})`).join(' ') : ''}</div>
+        </div>
+      </div>`;
+    card.querySelector('input').onchange = (e) => {
+      e.target.checked ? caseSelected.add(c.id) : caseSelected.delete(c.id);
+      if(e.target.checked) caseFocusId = c.id;
+      const f = focusedCase();
+      caseStatus(caseSelected.size
+        ? `${caseSelected.size} selected · showing ${f ? f.id : ''} on the map`
+        : '');
+      document.querySelectorAll('#case-list label').forEach(l => {
+        const cb = l.querySelector('input');
+        l.style.borderColor = cb.checked ? (cb.dataset.case === (f && f.id) ? 'var(--accent)' : 'var(--accent-dim)') : 'var(--line)';
+      });
+    };
+    el.appendChild(card);
+  });
+}
+
+function drawCaseOverlay(){
+  // only the focused case -- every ticked case at once turned the floor into
+  // a field of unlabelled rings
+  const focus = casePlayback ? casePlayback.def : focusedCase();
+  if(!focus) return;
+  const marks = [focus];
+  ctx.save();
+  marks.forEach(c => {
+    c.blocks.forEach(([r,cc]) => {
+      const [x,y] = cellCenter(r,cc);
+      ctx.strokeStyle = 'var(--danger)'; ctx.strokeStyle = '#ff5f56'; ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x-cell*0.3,y-cell*0.3); ctx.lineTo(x+cell*0.3,y+cell*0.3);
+      ctx.moveTo(x+cell*0.3,y-cell*0.3); ctx.lineTo(x-cell*0.3,y+cell*0.3);
+      ctx.stroke();
+    });
+    c.robots.forEach((rb,i) => {
+      const col = robotColors[i % robotColors.length];
+      const [sx,sy] = cellCenter(rb.start[0], rb.start[1]);
+      ctx.strokeStyle = col; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(sx,sy,cell*0.36,0,Math.PI*2); ctx.stroke();
+      ctx.fillStyle = col; ctx.font = `${Math.floor(cell*0.2)}px 'JetBrains Mono'`;
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(rb.id + ' start', sx, sy - cell*0.52);
+      ctx.fillStyle = col; ctx.font = `${Math.floor(cell*0.24)}px 'JetBrains Mono'`;
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      if(!rb.goal) return;
+      const [gx,gy] = cellCenter(rb.goal[0], rb.goal[1]);
+      ctx.strokeRect(gx-cell*0.32, gy-cell*0.32, cell*0.64, cell*0.64);
+      ctx.fillText(rb.id + ' goal', gx, gy - cell*0.52);
+      ctx.setLineDash([3,4]); ctx.globalAlpha = 0.45;
+      ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(gx,gy); ctx.stroke();
+      ctx.setLineDash([]); ctx.globalAlpha = 1;
+    });
+  });
+  ctx.restore();
+}
+
+async function routeBetween(start, goal){
+  if(start[0] === goal[0] && start[1] === goal[1]) return [start];
+  const r = await fetch('/api/route', {method:'POST', headers:{'Content-Type':'application/json'},
+                                       body: JSON.stringify({start, goal})});
+  const p = (await r.json()).path;
+  return p.length ? p : [start];
+}
+
+// Build one continuous timeline: walk the robots from where they already stand
+// to the case's start cells, then play the recorded ticks. No teleporting, so a
+// screen recording reads as one take.
+async function buildTimeline(run, standing){
+  const actors = run.case.robots.map(r => r.id);
+  const steps = [];
+
+  // --- staging walk: every actor A*s from its current cell to its case start
+  const walks = {};
+  let longest = 0;
+  for(const rb of run.case.robots){
+    const from = standing[rb.id] || rb.start;
+    walks[rb.id] = await routeBetween(from, rb.start);
+    longest = Math.max(longest, walks[rb.id].length);
+  }
+  for(let i = 0; i < longest; i++){
+    const snap = {};
+    actors.forEach(id => {
+      const w = walks[id];
+      snap[id] = w[Math.min(i, w.length - 1)];
+    });
+    steps.push({pos: snap, phase: 'moving into position', t: null});
+  }
+  if(longest) steps.push({pos: steps[steps.length-1].pos, phase: 'ready', t: null});
+
+  // --- the case itself
+  run.frames.forEach(f => {
+    const snap = {};
+    f.robots.forEach(rb => { snap[rb.id] = [rb.r, rb.c]; });
+    steps.push({pos: snap, phase: run.mode, t: f.t});
+  });
+
+  // --- hold on the final frame so the eye can land before the next case
+  const last = steps[steps.length - 1];
+  for(let i = 0; i < 6; i++) steps.push({pos: last.pos, phase: 'done', t: last.t});
+  return {steps, actors};
+}
+
+function playTimeline(run, timeline){
+  return new Promise(resolve => {
+    const speed = () => parseInt(document.getElementById('case-speed').value);
+    let i = 0;
+    casePlayback = {def: run.case, mode: run.mode};
+    const tick = () => {
+      if(caseStop || i >= timeline.steps.length){ resolve(); return; }
+      const step = timeline.steps[i++];
+      // actors move; everyone else keeps standing exactly where they were
+      Object.entries(step.pos).forEach(([id, cell]) => {
+        const prev = robots[id] || {};
+        robots[id] = {robot_id: id, r: cell[0], c: cell[1], pos: cell,
+                      rr: prev.rr, rc: prev.rc,
+                      state: step.t ? 'EN_ROUTE_TO_DROPOFF' : 'IDLE',
+                      display_status: step.t ? run.case.id : 'moving into position',
+                      battery: prev.battery ?? 100, completed: 0,
+                      idx: prev.idx ?? timeline.actors.indexOf(id),
+                      intent: null, task_pickup: null, task_dropoff: null};
+      });
+      setCaseCaption(`${run.case.id} — ${run.case.title}`,
+                     step.t ? `${step.phase} · tick ${step.t}` : step.phase);
+      caseStatus(`${run.case.id} [${run.mode}] ${step.phase}`);
+      setTimeout(tick, speed());
+    };
+    tick();
+  });
+}
+
+function setCaseCaption(title, sub){
+  const el = document.getElementById('case-caption');
+  if(!el) return;
+  if(title === null){ el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  el.innerHTML = `<b>${title}</b><span style="color:var(--text-dim); margin-left:10px;">${sub || ''}</span>`;
+}
+
+function renderCaseResult(run){
+  const m = run.metrics, el = document.getElementById('case-results');
+  const key = `res-${run.case.id}`;
+  let box = document.getElementById(key);
+  if(!box){
+    box = document.createElement('div');
+    box.id = key;
+    box.style.cssText = 'padding:9px 11px; background:var(--panel-2); border:1px solid var(--line); border-radius:5px; margin-bottom:8px;';
+    box.innerHTML = `<div style="color:var(--text); margin-bottom:5px;">${run.case.id} — ${run.case.title}</div>
+      <div class="rows"></div>`;
+    el.appendChild(box);
+  }
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex; gap:9px; flex-wrap:wrap; color:var(--text); font-size:10px; padding-top:3px;';
+  row.innerHTML = `<b style="color:${run.mode==='before'?'var(--warn)':'var(--accent)'}">${run.mode}</b>
+    <span>${m.ticks} ticks (${m.seconds}s)</span>
+    <span>free-flow ${m.free_flow_ticks}</span>
+    <span>delay ${m.delay_ticks}</span>
+    <span>wait ${m.wait_ticks}</span>
+    <span>collisions ${m.collisions}</span>
+    <span>${m.finished ? 'finished' : 'HIT TICK LIMIT'}</span>`;
+  box.querySelector('.rows').appendChild(row);
+}
+
+document.getElementById('btn-run-cases').onclick = async () => {
+  if(!caseSelected.size){ caseStatus('pick at least one case'); return; }
+  caseStop = false;
+  document.getElementById('case-results').innerHTML = '';
+  // where every robot is standing right now -- the first case walks them from here
+  const standing = {};
+  Object.entries(robots).forEach(([id, rb]) => { standing[id] = [rb.r, rb.c]; });
+
+  const compare = document.getElementById('case-compare').checked;
+  for(const c of selectedCases()){
+    const modes = (compare && c.modes.length > 1) ? c.modes : [c.modes[c.modes.length-1]];
+    for(const mode of modes){
+      if(caseStop) break;
+      caseStatus(`${c.id} [${mode}] — running…`);
+      const res = await fetch('/api/run-case', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({case_id: c.id, mode})
+      });
+      const run = await res.json();
+      renderCaseResult(run);
+      const timeline = await buildTimeline(run, standing);
+      await playTimeline(run, timeline);
+      // next case starts its walk from wherever this one left the robots
+      const finish = timeline.steps[timeline.steps.length - 1].pos;
+      Object.entries(finish).forEach(([id, cell]) => { standing[id] = cell; });
+    }
+  }
+  // hold the last frame instead of snapping back to the live fleet, so a screen
+  // recording ends cleanly; "Back to live" releases it
+  if(!caseStop){
+    caseStatus('holding final frame — press Back to live');
+    setCaseCaption('Cases finished', 'press Back to live to resume the real fleet');
+  } else {
+    casePlayback = null;
+    setCaseCaption(null);
+    caseStatus('live fleet');
+  }
+};
+
+document.getElementById('btn-stop-cases').onclick = () => {
+  caseStop = true; casePlayback = null; robots = {}; setCaseCaption(null); caseStatus('live fleet');
+};
+
+loadCases();
+
+// --------------------------------------------------- fleet presence banner
+// The dashboard is a passive observer: with no robot processes running the
+// grid is legitimately empty. Say so instead of looking broken.
+let robotsOnline = 0;
+async function pollFleet(){
+  try {
+    const r = await fetch('/api/fleet-status');
+    robotsOnline = (await r.json()).robots_online;
+  } catch(e){ robotsOnline = 0; }
+  document.getElementById('no-fleet').style.display = robotsOnline ? 'none' : 'block';
+}
+pollFleet();
+setInterval(pollFleet, 3000);
 </script>
 <script type="module" src="/static/warehouse3d.js"></script>
 </body>

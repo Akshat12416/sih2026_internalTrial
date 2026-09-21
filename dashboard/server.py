@@ -35,6 +35,18 @@ connections: list = []
 loop_ref = {"loop": None}
 
 
+def _robots_online() -> int:
+    """Robots the observer has actually heard from. 0 means no fleet is running,
+    so anything we send lands on ports nobody is bound to."""
+    return len([k for k in fleet_state if k != "_events"])
+
+
+@app.get("/api/fleet-status")
+def fleet_status():
+    return {"robots_online": _robots_online(),
+            "hint": "python -m live.orchestrator --robots 3 --full"}
+
+
 @app.get("/")
 def index():
     return FileResponse(str(STATIC_DIR / "index.html"))
@@ -149,7 +161,7 @@ async def spawn_batch(req: TaskBatchRequest):
             except OSError:
                 pass
     sock.close()
-    return {"status": "ok", "count": len(req.tasks)}
+    return {"status": "ok", "count": len(req.tasks), "robots_online": _robots_online()}
 
 @app.post("/api/clear-tasks")
 async def clear_tasks():
@@ -211,7 +223,7 @@ async def spawn_task(req: TaskRequest = None):
         except OSError:
             pass
     sock.close()
-    return {"status": "ok", "task_id": tid}
+    return {"status": "ok", "task_id": tid, "robots_online": _robots_online()}
 
 async def auto_task_loop():
     global auto_tasks_active
@@ -251,6 +263,48 @@ async def run_benchmark(req: BenchmarkRequest):
         "base": base,
         "reduction": reduction
     }
+
+class RouteRequest(BaseModel):
+    start: list
+    goal: list
+
+
+@app.post("/api/route")
+def route(req: RouteRequest):
+    """A* between two cells. The case player uses this to walk robots from
+    wherever they are to a case's start cells, instead of teleporting them."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from core.layouts import demo_warehouse
+    from core.planner import astar
+    path = astar(demo_warehouse(), tuple(req.start), tuple(req.goal)) or []
+    return {"path": [list(c) for c in path]}
+
+
+class CaseRequest(BaseModel):
+    case_id: str
+    mode: str = "after"
+
+
+@app.get("/api/cases")
+def list_cases():
+    """The story.md cases, as data the UI can mark on the grid before running."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from sim.scenarios import CASES
+    return {"cases": [c.public() for c in CASES]}
+
+
+@app.post("/api/run-case")
+async def run_case_api(req: CaseRequest):
+    """Runs one case headlessly through the same RobotAgent.step() the live
+    robots use, and hands back per-tick frames for the UI to replay. This never
+    touches the live fleet -- pull the plug on the robots and cases still run."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from sim.scenarios import run_case
+    return await asyncio.to_thread(run_case, req.case_id, req.mode)
+
 
 @app.on_event("startup")
 async def startup():

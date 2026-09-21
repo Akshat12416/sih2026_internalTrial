@@ -458,6 +458,35 @@ function syncPending(time) {
   pendingGroup.children.forEach(o => { if (o.userData.pulse) o.scale.setScalar(1 + Math.sin(time * 6) * 0.25); });
 }
 
+// ------------------------------------------------- story-case start/goal marks
+// Mirrors the 2D grid overlay so a ticked case is visible on the 3D floor too.
+const caseGroup = new THREE.Group();
+scene.add(caseGroup);
+let caseKey = '';
+function syncCaseMarks(time) {
+  const marks = window.dash?.caseMarks || [];
+  const key = JSON.stringify(marks);
+  if (key !== caseKey) {
+    caseKey = key;
+    caseGroup.children.forEach(o => o.geometry.dispose());
+    caseGroup.clear();
+    marks.forEach(({ cell, kind }) => {
+      const color = kind === 'block' ? 0xff5c72 : kind === 'goal' ? 0xffcf6b : 0x37f0b0;
+      const geo = kind === 'goal'
+        ? new THREE.RingGeometry(0.42 * S, 0.5 * S, 4)          // square outline = goal
+        : new THREE.RingGeometry(0.3 * S, 0.44 * S, 32);        // ring = start / block
+      const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial(
+        { color, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide }));
+      m.rotation.x = -Math.PI / 2;
+      if (kind === 'goal') m.rotation.z = Math.PI / 4;
+      m.position.copy(cellPos(cell[0], cell[1], 0.04));
+      m.userData.pulse = kind === 'block';
+      caseGroup.add(m);
+    });
+  }
+  caseGroup.children.forEach(o => { if (o.userData.pulse) o.scale.setScalar(1 + Math.sin(time * 5) * 0.2); });
+}
+
 const hover = new THREE.Mesh(new THREE.PlaneGeometry(0.94 * S, 0.94 * S).rotateX(-Math.PI / 2),
   new THREE.MeshBasicMaterial({ color: 0x37f0b0, transparent: true, opacity: 0.25, depthWrite: false }));
 hover.visible = false;
@@ -525,6 +554,7 @@ renderer.setAnimationLoop(() => {
   if (!host.offsetParent) return; // tab hidden: skip rendering
   syncRobots(dt, time);
   syncPending(time);
+  syncCaseMarks(time);
   updateFollow(dt);
   controls.update();
   composer.render();

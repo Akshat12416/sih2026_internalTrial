@@ -105,6 +105,7 @@ class RobotAgent:
 
     def __post_init__(self):
         self.book = ReservationBook(self.robot_id)
+        self.home = self._pick_home(self.pos)
         self.start_pos = self.pos
         self.perception = EdgePerceptionModel(rng_seed=abs(hash(self.robot_id)) % (2**31))
         
@@ -127,6 +128,7 @@ class RobotAgent:
         self.last_rank = None
         self.goal_since_t, self._rank_goal = 0, None
         self.book = ReservationBook(self.robot_id)
+        self.home = self._pick_home(self.pos)
 
     def _update_pos(self, new_pos: Cell):
         self.pos = new_pos
@@ -134,17 +136,44 @@ class RobotAgent:
             self.dstar_router.move_to(new_pos)
 
     def _parking_cell(self) -> Optional[Cell]:
-        """Fleet policy (all modes, baseline included): idle robots park on the
-        perimeter side lanes, out of the aisles and away from pickup/dropoff/charge
-        cells. Idle robots camping next to a dropoff can otherwise wall it off
-        permanently. Returns None when already parked."""
-        edge = (0, self.wmap.cols - 1)
-        if self.pos[1] in edge and not self._on_resource_cell():
+        """Fleet policy (all modes, baseline included): an idle robot goes back
+        to its OWN home cell -- where it started -- and stays there. Deterministic
+        and tidy: the fleet keeps its formation instead of drifting across the
+        floor between jobs, and nobody camps on a shared resource (a robot parked
+        on or in front of a dropoff walls it off for everyone). Returns None when
+        already home. Measured: same completion time as parking on the nearest
+        perimeter lane, which is what this replaced."""
+        if self.pos == self.home:
             return None
         taken = {it.path[0] for it in self.book.peers.values() if it.path}
-        lanes = [(r, c) for r in range(self.wmap.rows) for c in edge
-                 if not self.wmap.is_blocked((r, c)) and (r, c) not in taken]
-        return min(lanes, key=lambda cell: manhattan(self.pos, cell), default=None)
+        if self.home not in taken and not self.wmap.is_blocked(self.home):
+            return self.home
+        # somebody else is sitting on my home: settle on the nearest clear cell
+        free = [(r, c) for r in range(self.wmap.rows) for c in range(self.wmap.cols)
+                if self._is_out_of_the_way((r, c)) and (r, c) not in taken
+                and not self.wmap.is_blocked((r, c))]
+        return min(free, key=lambda cell: manhattan(self.pos, cell), default=None)
+
+    def _is_out_of_the_way(self, cell: Cell) -> bool:
+        """A cell an idle robot may sit on indefinitely: plain floor, not a shared
+        resource, not the approach to one, and not inside a single-width aisle."""
+        r, c = cell
+        if self.wmap.grid[r][c] != FREE or cell in self.wmap.aisle_cells:
+            return False
+        for dr, dc in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nr, nc = r + dr, c + dc
+            if 0 <= nr < self.wmap.rows and 0 <= nc < self.wmap.cols                     and self.wmap.grid[nr][nc] in (PICKUP, DROPOFF, CHARGE):
+                return False
+        return True
+
+    def _pick_home(self, pos: Cell) -> Cell:
+        """Home is the spawn cell, unless spawning on a resource cell or in an
+        aisle -- then the nearest cell an idle robot may legitimately sit on."""
+        if self._is_out_of_the_way(pos):
+            return pos
+        cands = [(r, c) for r in range(self.wmap.rows) for c in range(self.wmap.cols)
+                 if self._is_out_of_the_way((r, c))]
+        return min(cands, key=lambda cell: manhattan(pos, cell), default=pos)
 
     def to_pibt_state(self) -> PIBTAgentState:
         """Exports agent state for L4 PIBT coordination."""
