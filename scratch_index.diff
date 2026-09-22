@@ -1,0 +1,123 @@
+diff --git a/dashboard/static/index.html b/dashboard/static/index.html
+index 5e9083c..d40b838 100644
+--- a/dashboard/static/index.html
++++ b/dashboard/static/index.html
+@@ -142,7 +142,23 @@
+   .view-container { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+   .view { flex: 1; display: none; overflow: hidden; }
+   .view.active { display: flex; flex-direction: column; }
++
++  #stage3d { flex: 1; position: relative; overflow: hidden; }
++  #stage3d canvas { display: block; }
++  #btn-follow {
++    position: absolute; top: 14px; left: 14px; z-index: 5; cursor: pointer;
++    background: rgba(9,12,16,0.8); color: var(--text); border: 1px solid var(--line);
++    padding: 8px 14px; border-radius: 4px; font: bold 12px 'JetBrains Mono', monospace; letter-spacing: 1px;
++  }
++  #btn-follow.on { background: var(--accent); color: var(--bg); border-color: var(--accent); }
++  .hint3d { position: absolute; bottom: 12px; left: 14px; font-size: 11px; color: var(--text-dim); pointer-events: none; }
+ </style>
++<script type="importmap">
++{ "imports": {
++  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
++  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
++} }
++</script>
+ </head>
+ <body>
+ <div class="app">
+@@ -156,13 +172,21 @@
+   <main>
+     <div class="view-container">
+       <div class="tabs">
+-        <div class="tab active" data-target="view-map">LIVE MAP</div>
++        <div class="tab active" data-target="view-3d">3D WAREHOUSE</div>
++        <div class="tab" data-target="view-map">2D MAP</div>
+         <div class="tab" data-target="view-telemetry">SWARM TELEMETRY</div>
+         <div class="tab" data-target="view-logs">ROBOT LOGS</div>
+         <div class="tab" data-target="view-benchmark">BENCHMARK</div>
+       </div>
+       
+-      <div id="view-map" class="view active">
++      <div id="view-3d" class="view active">
++        <div id="stage3d">
++          <button id="btn-follow">FOLLOW: OFF</button>
++          <div class="hint3d">follow: click again for next robot · drag: orbit · scroll: zoom · click floor: pickup → dropoff, then Send Queue</div>
++        </div>
++      </div>
++
++      <div id="view-map" class="view">
+         <div class="stage" style="flex:1;"><canvas id="grid" width="900" height="660"></canvas></div>
+       </div>
+       
+@@ -313,7 +337,8 @@ function drawStatic(){
+   });
+ }
+ 
+-function colorFor(id, idx){ return robotColors[idx % robotColors.length]; }
++// colour comes from the robot number (R1 -> first colour), so it never shifts when robots report in a different order
++function colorFor(id){ return robotColors[(parseInt(id.replace(/\D/g, '')) - 1) % robotColors.length]; }
+ 
+ function draw(){
+   drawStatic();
+@@ -535,7 +560,7 @@ function renderFleet(list){
+   const el = document.getElementById('fleet');
+   el.innerHTML = '';
+   list.sort((a,b)=>a.robot_id.localeCompare(b.robot_id)).forEach((rb, idx)=>{
+-    robots[rb.robot_id] = {r: rb.pos[0], c: rb.pos[1], idx};
++    robots[rb.robot_id] = {...rb, r: rb.pos[0], c: rb.pos[1], idx};
+     
+     let prev = prevStatus[rb.robot_id];
+     if (rb.display_status && rb.display_status !== prev) {
+@@ -611,7 +636,7 @@ function renderAuctions() {
+             const details = bidData.details || {dist_to_pickup: bidData.cost, dist_to_dropoff: 0, battery_penalty: 0};
+             bodyHtml += `<div style="display:flex; margin-bottom:6px; ${rowStyle}">
+                 <span style="flex:1">[${rid}]</span>
+-                <span style="flex:4; opacity:0.8; font-size:10px;">Pickup(${Math.floor(details.dist_to_pickup)}) + Dropoff(${Math.floor(details.dist_to_dropoff)}) + Batt(${details.battery_penalty}) + Nudge(${details.nudge_penalty || 0})</span>
++                <span style="flex:3; opacity:0.8; font-size:11px;">Path2Pickup(${Math.floor(details.dist_to_pickup)}) + Path2Dropoff(${Math.floor(details.dist_to_dropoff)}) + BattPenalty(${details.battery_penalty})</span>
+                 <span style="flex:1; text-align:right;">${Math.floor(bidData.cost)}</span>
+             </div>`;
+         });
+@@ -696,12 +721,14 @@ canvas.addEventListener('click', (e) => {
+     const x = e.clientX - rect.left;
+     const y = e.clientY - rect.top;
+     
+-    const c = Math.floor((x - offX) / cell);
+-    const r = Math.floor((y - offY) / cell);
+-    
++    cellClick(Math.floor((y - offY) / cell), Math.floor((x - offX) / cell));
++});
++
++// shared by the 2D canvas and the 3D view
++function cellClick(r, c) {
+     if(r < 0 || r >= wmap.grid.length || c < 0 || c >= wmap.grid[0].length) return;
+     if(wmap.grid[r][c] === 1) return; // skip shelves
+-    
++
+     if(clickState === 'SELECT_PICKUP') {
+         currentPickup = [r, c];
+         clickState = 'SELECT_DROPOFF';
+@@ -712,7 +739,15 @@ canvas.addEventListener('click', (e) => {
+         clickState = 'SELECT_PICKUP';
+         updateQueueUI();
+     }
+-});
++}
++
++// read-only handle for the 3D view module
++window.dash = {
++    colorFor, cellClick,
++    get robots() { return robots; },
++    get taskQueue() { return taskQueue; },
++    get currentPickup() { return currentPickup; },
++};
+ 
+ function updateQueueUI() {
+     const el = document.getElementById('queue-status');
+@@ -789,5 +824,6 @@ document.getElementById('btn-bench').onclick = async () => {
+   `;
+ };
+ </script>
++<script type="module" src="/static/warehouse3d.js"></script>
+ </body>
+ </html>
