@@ -218,19 +218,17 @@ class RobotAgent:
             if self.battery < 60.0:
                 batt_penalty = int(((60.0 - self.battery) / 10.0) ** 2)
                 
-            # 4. Add nudge penalty
-            # Penalize paths that require plowing through a stationary peer.
-            # We use +9 because a nudge realistically wastes ~10-15 ticks (moving to staging and back).
-            # If the penalty is too high (like 50), a robot right next to the task would lose
-            # to a robot on the other side of the warehouse just to avoid a single nudge!
+            # 4. Add dynamic nudge penalty
+            # Penalize paths that require plowing through a stationary peer based on how
+            # far that peer will actually have to drive to find a staging cell!
             nudge_penalty = 0
             if self.cooperative and self.state == "IDLE":
                 for cell in path_to_pickup:
                     if cell in stationary_peers:
-                        nudge_penalty += 9
+                        nudge_penalty += self._nudge_cost(cell)
                 for cell in (path_to_dropoff or []):
                     if cell in stationary_peers:
-                        nudge_penalty += 9
+                        nudge_penalty += self._nudge_cost(cell)
             
             cost = dist_to_pickup + dist_to_dropoff + batt_penalty + nudge_penalty
             
@@ -310,6 +308,26 @@ class RobotAgent:
                     seen.add(n)
                     q.append(n)
         return None
+
+    def _nudge_cost(self, target_cell: Cell) -> int:
+        """Calculates the dynamic cost of displacing a peer currently occupying target_cell."""
+        seen = {target_cell}
+        q = deque([target_cell])
+        occupied_cells = {intent.path[0] for intent in self.book.peers.values() if intent.path}
+        
+        while q:
+            cur = q.popleft()
+            r, c = cur
+            if cur != target_cell and self.wmap.grid[r][c] == FREE and cur not in occupied_cells:
+                dist = manhattan(target_cell, cur)
+                # 2x distance (out and back) + small overhead for wake/turn delays
+                return (dist * 2) + 2
+            for n in self.wmap.neighbours(cur):
+                if n not in seen:
+                    seen.add(n)
+                    q.append(n)
+        return 15  # Fallback if no staging cell is found
+
 
     def _replan(self):
         goal = self._goal_for_state()
