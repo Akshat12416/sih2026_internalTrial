@@ -162,6 +162,14 @@ class RobotAgent:
             
         reserved = self.book.as_reserved_table() if self.cooperative else None
         
+        # Determine which peers are currently stationary (likely to be nudged)
+        self.book.prune(now=time.time())
+        stationary_peers = set()
+        if self.cooperative:
+            for p_id, intent in self.book.peers.items():
+                if len(set(intent.path)) == 1:
+                    stationary_peers.add(intent.path[0])
+        
         for task_id, task in list(self.known_tasks.items()):
             # Only bid once per task to prevent shifting bids as busy robots move!
             if task_id in self.open_bids and self.robot_id in self.open_bids[task_id]:
@@ -209,12 +217,26 @@ class RobotAgent:
             batt_penalty = 0
             if self.battery < 60.0:
                 batt_penalty = int(((60.0 - self.battery) / 10.0) ** 2)
+                
+            # 4. Add nudge penalty
+            # Penalize paths that require plowing through a stationary peer.
+            # We use +15 because a nudge realistically wastes ~10-15 ticks (moving to staging and back).
+            # If the penalty is too high (like 50), a robot right next to the task would lose
+            # to a robot on the other side of the warehouse just to avoid a single nudge!
+            nudge_penalty = 0
+            if self.cooperative and self.state == "IDLE":
+                for cell in path_to_pickup:
+                    if cell in stationary_peers:
+                        nudge_penalty += 15
+                for cell in (path_to_dropoff or []):
+                    if cell in stationary_peers:
+                        nudge_penalty += 15
             
-            cost = dist_to_pickup + dist_to_dropoff + batt_penalty
+            cost = dist_to_pickup + dist_to_dropoff + batt_penalty + nudge_penalty
             
             bid_msg = {"type": "bid", "task_id": task_id,
                         "robot_id": self.robot_id, "cost": cost,
-                        "details": {"dist_to_pickup": dist_to_pickup, "dist_to_dropoff": dist_to_dropoff, "battery_penalty": batt_penalty}}
+                        "details": {"dist_to_pickup": dist_to_pickup, "dist_to_dropoff": dist_to_dropoff, "battery_penalty": batt_penalty, "nudge_penalty": nudge_penalty}}
             self.send(bid_msg)
             # loop back to ourselves too -- the network layer correctly
             # never delivers our own broadcasts back to us (it's not our
