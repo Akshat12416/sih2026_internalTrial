@@ -34,7 +34,7 @@ controls.enableDamping = true;
 controls.maxPolarAngle = Math.PI * 0.48;
 controls.minDistance = 3;
 controls.maxDistance = 80;
-controls.zoomSpeed = 2.5; // Made zoom much faster as requested
+controls.zoomSpeed = 7.5; // Made zoom 3x faster as requested
 
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
