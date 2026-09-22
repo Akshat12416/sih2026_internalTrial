@@ -34,6 +34,7 @@ controls.enableDamping = true;
 controls.maxPolarAngle = Math.PI * 0.48;
 controls.minDistance = 3;
 controls.maxDistance = 80;
+controls.zoomSpeed = 2.5; // Made zoom much faster as requested
 
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
@@ -491,17 +492,56 @@ renderer.domElement.addEventListener('pointerup', e => {
 // ---------------------------------------------------------------- follow a robot
 // Camera keeps its angle and zoom but glides along with the robot; drag still orbits around it.
 let followId = null, approach = false;
+let globalView = null; // 'VIEW: ISO' or 'VIEW: TOP'
 const followBtn = document.getElementById('btn-follow');
 const FOLLOW_OFFSET = new THREE.Vector3(-4, 5.5, 6.5);
+
 followBtn.onclick = () => {
   const ids = [...fleet.keys()].sort();
-  followId = ids[ids.indexOf(followId) + 1] || null; // OFF -> R1 -> R2 ... -> OFF
-  followBtn.textContent = `FOLLOW: ${followId || 'OFF'}`;
-  followBtn.classList.toggle('on', !!followId);
-  approach = !!followId;
+  const cycle = ['OFF', 'VIEW: ISO', 'VIEW: TOP', ...ids];
+  
+  let currentKey = followId || globalView || 'OFF';
+  let nextKey = cycle[cycle.indexOf(currentKey) + 1] || 'OFF';
+  
+  followId = null;
+  globalView = null;
+  
+  if (nextKey === 'OFF') {
+      followBtn.textContent = 'CAMERA: FREE';
+      followBtn.classList.remove('on');
+  } else if (nextKey.startsWith('VIEW:')) {
+      globalView = nextKey;
+      followBtn.textContent = globalView;
+      followBtn.classList.add('on');
+  } else {
+      followId = nextKey;
+      followBtn.textContent = `FOLLOW: ${followId}`;
+      followBtn.classList.add('on');
+      approach = true;
+  }
 };
-controls.addEventListener('start', () => { approach = false; });
+
+controls.addEventListener('start', () => { 
+    approach = false; 
+    globalView = null; 
+    if (!followId) {
+        followBtn.textContent = 'CAMERA: FREE';
+        followBtn.classList.remove('on');
+    }
+});
+
 function updateFollow(dt) {
+  if (globalView) {
+      // Lerp to the global view
+      const targetPos = globalView === 'VIEW: TOP' ? new THREE.Vector3(0.1, 45, 0) : new THREE.Vector3(-18, 22, 26);
+      const targetLook = new THREE.Vector3(0, 0, 0);
+      
+      const k = 1 - Math.exp(-dt * 4);
+      camera.position.lerp(targetPos, k);
+      controls.target.lerp(targetLook, k);
+      return;
+  }
+
   const v = fleet.get(followId);
   if (!v) return;
   const k = 1 - Math.exp(-dt * 5);
