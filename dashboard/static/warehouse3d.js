@@ -151,11 +151,17 @@ function floorTexture(wm) {
       g.beginPath(); g.moveTo(cx, cy - s); g.lineTo(cx + s, cy); g.lineTo(cx, cy + s); g.lineTo(cx - s, cy); g.fill();
     });
     const zone = (cells, color, label) => cells.forEach(([r, c], i) => {
-      // Intentionally left empty to remove highlighted zones
+      const x = X(c) + 4, y = Y(r) + 4, s = P - 8;
+      g.save(); g.beginPath(); g.rect(x, y, s, s); g.clip();
+      g.strokeStyle = color + '55'; g.lineWidth = 5;
+      for (let d = -s; d < s * 2; d += 14) { g.beginPath(); g.moveTo(x + d, y); g.lineTo(x + d - s, y + s); g.stroke(); }
+      g.restore();
+      g.strokeStyle = color; g.lineWidth = 4; g.strokeRect(x, y, s, s);
+      // Removed the central pill and P1/D1 text labels per user request
     });
     // zone(wm.pickup, '#3d9cff', 'P');
     // zone(wm.dropoff, '#ff5fc8', 'D');
-    // zone(wm.charge, '#37f0b0', 'C');
+    zone(wm.charge, '#37f0b0', 'C');
 
     // aisle tags at the top of every aisle running between two racks
     let aisle = 0;
