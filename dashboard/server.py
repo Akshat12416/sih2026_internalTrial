@@ -76,7 +76,8 @@ def udp_listener(port: int):
         except Exception:
             continue
         if msg.get("type") == "status":
-            fleet_state[msg["robot_id"]] = msg
+            prev = fleet_state.get(msg["robot_id"], {})  # keep last intent, status packets don't carry it
+            fleet_state[msg["robot_id"]] = {**msg, "intent": prev.get("intent"), "priority": prev.get("priority")}
         elif msg.get("type") == "intent":
             if msg["robot_id"] in fleet_state:
                 fleet_state[msg["robot_id"]]["intent"] = msg["path"]
