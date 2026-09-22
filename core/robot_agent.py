@@ -148,7 +148,12 @@ class RobotAgent:
         taken = {it.path[0] for it in self.book.peers.values() if it.path}
         if self.home not in taken and not self.wmap.is_blocked(self.home):
             return self.home
-        # somebody else is sitting on my home: settle on the nearest clear cell
+        # If someone is moving through or temporarily on our home cell, wait in place
+        for it in self.book.peers.values():
+            if it.path and it.path[0] == self.home:
+                if it.state != "IDLE" or (len(it.path) >= 2 and it.path[1] != self.home):
+                    return None  # Wait in place until they clear our home spot!
+        # somebody else is sitting on my home permanently: settle on the nearest clear cell
         free = [(r, c) for r in range(self.wmap.rows) for c in range(self.wmap.cols)
                 if self._is_out_of_the_way((r, c)) and (r, c) not in taken
                 and not self.wmap.is_blocked((r, c))]
@@ -175,27 +180,38 @@ class RobotAgent:
                  if self._is_out_of_the_way((r, c))]
         return min(cands, key=lambda cell: manhattan(pos, cell), default=pos)
 
-    def to_pibt_state(self) -> PIBTAgentState:
-        """Exports agent state for L4 PIBT coordination."""
+    def _effective_goal(self) -> Optional[Cell]:
         goal = self._goal_for_state()
         if goal is None and self.state == "IDLE":
             goal = self._parking_cell()
+        return goal
+
+    def to_pibt_state(self) -> PIBTAgentState:
+        """Exports agent state for L4 PIBT coordination."""
+        goal = self._effective_goal()
         if goal != self._rank_goal:
             self._rank_goal, self.goal_since_t = goal, self.t
+        if self.state == "IDLE":
+            goal_since = 999999
+            prio_base = 999
+        else:
+            goal_since = self.goal_since_t
+            prio_base = self.priority_base
         return PIBTAgentState(
             robot_id=self.robot_id,
             pos=self.pos,
             goal=goal,
-            goal_since=self.goal_since_t,
-            priority_base=self.priority_base,
+            goal_since=goal_since,
+            priority_base=prio_base,
             path=list(self.path),
+            is_nudged=getattr(self, "nudged", False),
         )
 
     def _send_intent(self, path: List[Cell], priority: int):
         """Broadcast our short-horizon plan. Cooperative robots also share the
         goal, wait time and PIBT rank peers need for local L3/L4 decisions."""
         msg = {"type": "intent", "robot_id": self.robot_id, "priority": priority,
-               "path": path, "start_t": self.t}
+               "path": path, "start_t": self.t, "state": self.state}
         if self.cooperative:
             st = self.to_pibt_state()
             self.last_rank = st.priority_key
@@ -206,13 +222,18 @@ class RobotAgent:
         """L4: run PIBT over ourselves + peers within PIBT_LOCAL_RADIUS, using only
         their broadcast intents, and return OUR next cell. Every nearby robot runs
         the same rule on (nearly) the same data; the L2 shield covers any mismatch."""
-        if self._goal_for_state() is not None and len(self.path) < 2:
+        if self._effective_goal() is not None and len(self.path) < 2:
             self._replan()
         agents = {self.robot_id: self.to_pibt_state()}
         for pid, it in self.book.peers.items():
             if not it.path or manhattan(it.path[0], self.pos) > PIBT_LOCAL_RADIUS:
                 continue
-            since, base = (it.rank[0], it.rank[1]) if it.rank else (it.start_t, it.priority)
+            if it.state == "IDLE":
+                since, base = (999999, 999)
+            elif it.rank:
+                since, base = (it.rank[0], it.rank[1])
+            else:
+                since, base = (it.start_t, it.priority)
             agents[pid] = PIBTAgentState(pid, it.path[0], tuple(it.goal) if it.goal else None,
                                          since, base, list(it.path))
         return run_pibt_step(agents, self.wmap)[self.robot_id]
@@ -247,7 +268,8 @@ class RobotAgent:
                 path=[tuple(c) for c in msg["path"]], start_t=msg["start_t"],
                 received_at=time.time(),
                 goal=tuple(msg["goal"]) if msg.get("goal") else None,
-                rank=tuple(msg["rank"]) if msg.get("rank") else None))
+                rank=tuple(msg["rank"]) if msg.get("rank") else None,
+                state=msg.get("state")))
         elif kind == "task_announce":
             created_t = msg.get("t") or self.t
             task = Task(msg["task_id"], tuple(msg["pickup"]), tuple(msg["dropoff"]), created_t)
@@ -459,7 +481,7 @@ class RobotAgent:
         return None
 
     def _replan(self):
-        goal = self._goal_for_state()
+        goal = self._effective_goal()
         if goal is None:
             self.path = []
             return
@@ -487,9 +509,31 @@ class RobotAgent:
                     for dt in range(400):
                         reserved.setdefault((cell, self.t + dt), self.robot_id + "#avoid")
         congestion_map = build_congestion_heatmap(self.book) if (self.cooperative and config.USE_CONGESTION_COST) else None
-        self.path = astar(self.wmap, self.pos, goal, reserved,
+        direct_path = astar(self.wmap, self.pos, goal, reserved,
                             start_t=self.t, self_id=self.robot_id,
                             congestion_map=congestion_map)
+
+        # Proactive Reroute vs Cooperative Yield Evaluation
+        if self.cooperative and direct_path and self.state != "IDLE":
+            stationary_peers = {
+                it.path[0] for it in self.book.peers.values()
+                if it.path and it.path[0] != goal and (it.state == "IDLE" or len(set(it.path)) == 1)
+            }
+            if any(c in stationary_peers for c in direct_path[1:]):
+                detour_reserved = dict(reserved) if reserved else {}
+                for sc in stationary_peers:
+                    for dt in range(40):
+                        detour_reserved.setdefault((sc, self.t + dt), "IDLE_PEER")
+                detour_path = astar(self.wmap, self.pos, goal, detour_reserved,
+                                    start_t=self.t, self_id=self.robot_id,
+                                    congestion_map=congestion_map)
+                # If clean detour exists with <= 3 extra steps, reroute around stationary peer!
+                if detour_path and len(detour_path) <= len(direct_path) + 3:
+                    self.path = detour_path
+                    self.display_status = "REROUTING"
+                    return
+
+        self.path = direct_path
         
         # If we couldn't find a path to our goal (e.g. because the goal itself 
         # is blacklisted or blocked), we should temporarily retreat to a staging cell!
@@ -568,6 +612,8 @@ class RobotAgent:
                 else:
                     self.current_task = None
                     self.state = "IDLE"
+                    if self.cooperative:
+                        self.home = self.pos  # Cooperative: stay at dropoff location instead of returning to start
             elif self.state == "EN_ROUTE_TO_CHARGE":
                 self.state = "CHARGING"
             self.path = []
@@ -599,11 +645,14 @@ class RobotAgent:
                 self._update_pos(next_cell_override)
                 if wants_move and self.path[1] == next_cell_override:
                     self.path = self.path[1:]
+                    self.display_status = ""
                 else:
                     self.path = []  # pushed/sidestepped: stale plan, replan next tick
+                    if self.state == "IDLE":
+                        self.display_status = "MAKING WAY"
+                        self.nudged = False
                 self.battery = max(0.0, self.battery - BATTERY_DRAIN_PER_MOVE)
                 self.wait_ticks = 0
-                self.display_status = ""
             elif is_safe:
                 # PIBT kept us in place: that is a wait only if we wanted to move
                 if wants_move:
@@ -616,6 +665,27 @@ class RobotAgent:
                 self.wait_ticks += 1
                 self.total_wait_ticks += 1
                 self.display_status = "L2_VETO"
+
+            if len(self.path) >= 2 and (next_cell_override == self.pos or not is_safe):
+                next_cell = self.path[1]
+                # NUDGE PROTOCOL: If blocked by a peer on next_cell, ask them to move!
+                if self.cooperative and self.wait_ticks % 2 == 1:
+                    blocker = None
+                    for peer_id, intent in self.book.peers.items():
+                        if intent.path and intent.path[0] == next_cell:
+                            blocker = peer_id
+                            break
+                    if blocker:
+                        self.send({"type": "nudge", "target": blocker, "from": self.robot_id})
+                        self.display_status = "ASKING TO MOVE"
+
+                # Dynamic starvation timeout to break persistent deadlocks
+                dynamic_starvation_limit = 10 + (5 - (self.priority_base % 5)) * 2
+                if self.wait_ticks > dynamic_starvation_limit:
+                    self.avoid_until[next_cell] = self.t + AVOID_WINDOW
+                    self.path = []
+                    self.wait_ticks = 0
+                    self.display_status = "RECALCULATING"
 
             if self.cooperative and len(self.path) >= 2:
                 horizon = [self.pos] + self.path[1:PLAN_HORIZON]
@@ -632,7 +702,7 @@ class RobotAgent:
             # resource would have nowhere to physically go.
             has_path = bool(self.path and len(self.path) >= 2)
             park = None if has_path else self._parking_cell()
-            if park or self._on_resource_cell() or self.nudged or has_path:
+            if park or self.nudged or has_path:
                 if self.nudged:
                     self.avoid_until[self.pos] = self.t + 10
                     self.path = []

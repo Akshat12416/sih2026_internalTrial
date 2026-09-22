@@ -194,7 +194,23 @@
       </div>
 
       <div id="view-map" class="view">
-        <div class="stage" style="flex:1;"><canvas id="grid" width="900" height="660"></canvas></div>
+        <div class="stage" style="flex:1; position:relative; background:#eae8e3;">
+          <canvas id="grid" width="900" height="660"></canvas>
+          <div id="map-status-bar" style="position:absolute; bottom:0; left:0; right:0; display:flex; justify-content:space-around; align-items:center; padding:18px 60px; background:linear-gradient(180deg, rgba(234,232,227,0), rgba(234,232,227,0.7) 20%, rgba(234,232,227,0.95)); z-index:5;">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span style="font-size:26px; color:#4a7aff; font-weight:bold;">→</span>
+              <span style="font-family:'Space Grotesk',sans-serif; font-size:16px; color:#444;">Moving <b id="map-count-moving" style="font-size:20px; color:#222;">0</b></span>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span style="font-size:26px; color:#7c5cbf; font-weight:bold;">↻</span>
+              <span style="font-family:'Space Grotesk',sans-serif; font-size:16px; color:#444;">Turning <b id="map-count-turning" style="font-size:20px; color:#222;">0</b></span>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span style="font-size:26px; color:#d4920a; font-weight:bold;">ⓨ</span>
+              <span style="font-family:'Space Grotesk',sans-serif; font-size:16px; color:#444;">Waiting <b id="map-count-waiting" style="font-size:20px; color:#222;">0</b></span>
+            </div>
+          </div>
+        </div>
       </div>
       
       <div id="view-telemetry" class="view">
@@ -301,7 +317,12 @@ const canvas = document.getElementById('grid');
 const ctx = canvas.getContext('2d');
 let wmap = null, cell = 40, offX = 0, offY = 0;
 let robots = {};       // id -> {target pos, rendered pos, ...}
-const robotColors = ['#37f0b0', '#7fb0ff', '#ffcf6b', '#ff8fd6', '#a78bfa', '#ff9b6b'];
+const robotColors = [
+  '#e53935', '#1e88e5', '#43a047', '#ff9800', '#8e24aa',
+  '#00acc1', '#d81b60', '#ffb300', '#5c6bc0', '#00897b',
+  '#f4511e', '#3949ab', '#7cb342', '#c0ca33', '#e91e63',
+  '#26a69a', '#ab47bc', '#5d4037', '#546e7a', '#ec407a'
+];
 
 async function loadWarehouse(){
   const res = await fetch('/warehouse');
@@ -318,14 +339,15 @@ function cellCenter(r,c){
 }
 
 function drawStatic(){
-  ctx.fillStyle = '#090c10';
+  // Warm off-white / cream background — easy on eyes, matching 3D floor tone
+  ctx.fillStyle = '#eae8e3';
   ctx.fillRect(0,0,canvas.width,canvas.height);
   if(!wmap) return;
   const rows = wmap.grid.length, cols = wmap.grid[0].length;
 
-  // faint blueprint grid
-  ctx.strokeStyle = '#151d27';
-  ctx.lineWidth = 1;
+  // Subtle light grid lines
+  ctx.strokeStyle = 'rgba(180,185,195,0.4)';
+  ctx.lineWidth = 0.5;
   for(let r=0;r<=rows;r++){
     ctx.beginPath(); ctx.moveTo(offX, offY+r*cell); ctx.lineTo(offX+cols*cell, offY+r*cell); ctx.stroke();
   }
@@ -333,27 +355,40 @@ function drawStatic(){
     ctx.beginPath(); ctx.moveTo(offX+c*cell, offY); ctx.lineTo(offX+c*cell, offY+rows*cell); ctx.stroke();
   }
 
+  // Black shelf blocks (solid black like reference video)
   for(let r=0;r<rows;r++){
     for(let c=0;c<cols;c++){
       const v = wmap.grid[r][c];
       const x = offX+c*cell, y = offY+r*cell;
-      if(v===1){ ctx.fillStyle = '#1a222c'; ctx.fillRect(x+2,y+2,cell-4,cell-4); }
+      if(v===1){
+        ctx.fillStyle = '#111111';
+        ctx.fillRect(x+1, y+1, cell-2, cell-2);
+      }
     }
   }
-  const markPoint = (cells, color, label) => {
-    ctx.fillStyle = color;
+
+  // Station markers: colored circles on the edges
+  const markStation = (cells, color, label) => {
     cells.forEach(([r,c])=>{
       const [cx,cy] = cellCenter(r,c);
-      ctx.beginPath(); ctx.arc(cx,cy,cell*0.14,0,Math.PI*2); ctx.fill();
+      // Outer ring
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(cx,cy,cell*0.28,0,Math.PI*2); ctx.stroke();
+      // Inner filled dot
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.arc(cx,cy,cell*0.1,0,Math.PI*2); ctx.fill();
     });
   };
   if(typeof autoTasks !== 'undefined' && autoTasks) {
-    markPoint(wmap.pickup, '#3d9cff', 'P');
-    markPoint(wmap.dropoff, '#ff8fd6', 'D');
+    markStation(wmap.pickup, '#3d9cff', 'P');
+    markStation(wmap.dropoff, '#ff8fd6', 'D');
   }
-  markPoint(wmap.charge, '#7fffb0', 'C');
+  markStation(wmap.charge, '#43a047', 'C');
 
-  ctx.strokeStyle = '#ffcf6b55';
+  // Choke points with subtle amber diamond
+  ctx.strokeStyle = 'rgba(212,146,10,0.35)';
+  ctx.lineWidth = 1.5;
   wmap.choke_points.forEach(([r,c])=>{
     const [cx,cy]=cellCenter(r,c);
     ctx.beginPath();
@@ -396,45 +431,90 @@ function draw(){
       ctx.beginPath(); ctx.arc(px, py, cell*0.4, 0, Math.PI*2); ctx.stroke();
   }
 
+  // Status bar counters
+  let movingCount = 0, turningCount = 0, waitingCount = 0;
+
   let i=0;
   for(const id in robots){
     const rb = robots[id];
+    const col = colorFor(id, rb.idx);
     
-    // Draw active task pickup/dropoff for this robot
+    // Count states for status bar
+    const ds = rb.display_status || rb.state || '';
+    if(ds === 'WAITING' || ds.startsWith('YIELDING') || rb.state === 'IDLE') waitingCount++;
+    else if(ds === 'RECALCULATING') turningCount++;
+    else movingCount++;
+    
+    // ── Full route line from robot → pickup → dropoff (like the reference video) ──
+    // Draws a prominent colored line showing the robot's full planned route
     if(rb.task_pickup && rb.task_dropoff) {
+      const [rx, ry] = cellCenter(rb.r, rb.c);
       const [px, py] = cellCenter(rb.task_pickup[0], rb.task_pickup[1]);
       const [dx, dy] = cellCenter(rb.task_dropoff[0], rb.task_dropoff[1]);
       
-      ctx.fillStyle = '#3d9cff';
-      ctx.beginPath(); ctx.arc(px, py, cell*0.2, 0, Math.PI*2); ctx.fill();
-      ctx.fillStyle = '#ff8fd6';
-      ctx.beginPath(); ctx.arc(dx, dy, cell*0.2, 0, Math.PI*2); ctx.fill();
+      // Route line: robot pos → pickup → dropoff (L-shaped segments through aisles)
+      ctx.save();
+      ctx.strokeStyle = col;
+      ctx.globalAlpha = 0.55;
+      ctx.lineWidth = 2.5;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
       
-      // Draw faint dashed line connecting them for context
-      ctx.lineWidth = 1;
-      ctx.setLineDash([2, 4]);
-      ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(dx, dy);
-      ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.stroke();
-      ctx.setLineDash([]);
+      // Line from robot to its current target (pickup or dropoff)
+      if(rb.state === 'EN_ROUTE_TO_PICKUP' || rb.state === 'IDLE') {
+        // Robot → pickup (L-shape: go horizontal then vertical)
+        ctx.beginPath();
+        ctx.moveTo(rx, ry);
+        ctx.lineTo(px, ry);  // horizontal first
+        ctx.lineTo(px, py);  // then vertical
+        ctx.stroke();
+        // pickup → dropoff
+        ctx.globalAlpha = 0.3;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(px, py);
+        ctx.lineTo(dx, py);  // horizontal
+        ctx.lineTo(dx, dy);  // vertical
+        ctx.stroke();
+        ctx.setLineDash([]);
+      } else {
+        // Robot → dropoff (delivering)
+        ctx.beginPath();
+        ctx.moveTo(rx, ry);
+        ctx.lineTo(dx, ry);  // horizontal first
+        ctx.lineTo(dx, dy);  // then vertical
+        ctx.stroke();
+      }
+      ctx.restore();
+      
+      // Small pickup marker
+      ctx.fillStyle = '#3d9cff';
+      ctx.beginPath(); ctx.arc(px, py, cell*0.15, 0, Math.PI*2); ctx.fill();
+      // Small dropoff marker
+      ctx.fillStyle = '#ff8fd6';
+      ctx.beginPath(); ctx.arc(dx, dy, cell*0.15, 0, Math.PI*2); ctx.fill();
     }
     
-    // Draw 6-tick projected intent (space-time plan)
+    // ── Intent preview (short-range plan, 6 cells ahead) ──
     if(rb.intent && rb.intent.length > 0) {
       ctx.beginPath();
       const [sx, sy] = cellCenter(rb.r, rb.c);
       ctx.moveTo(sx, sy);
       rb.intent.forEach(cell => {
-         const [cx, cy] = cellCenter(cell[0], cell[1]);
-         ctx.lineTo(cx, cy);
+         const [icx, icy] = cellCenter(cell[0], cell[1]);
+         ctx.lineTo(icx, icy);
       });
-      ctx.strokeStyle = colorFor(id, rb.idx) + '88';
+      ctx.strokeStyle = col;
+      ctx.globalAlpha = 0.8;
       ctx.lineWidth = 3;
       ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
       ctx.stroke();
+      ctx.globalAlpha = 1;
       
       const last = rb.intent[rb.intent.length-1];
       const [lx, ly] = cellCenter(last[0], last[1]);
-      ctx.fillStyle = colorFor(id, rb.idx);
+      ctx.fillStyle = col;
       ctx.fillRect(lx-3, ly-3, 6, 6);
     }
     
@@ -446,21 +526,47 @@ function draw(){
       rb.rc += (rb.c - rb.rc) * 0.22;
     }
     const [cx, cy] = cellCenter(rb.rr, rb.rc);
-    const col = colorFor(id, rb.idx);
-    // glow
-    const grad = ctx.createRadialGradient(cx,cy,0,cx,cy,cell*0.9);
-    grad.addColorStop(0, col+'55'); grad.addColorStop(1, col+'00');
-    ctx.fillStyle = grad;
-    ctx.beginPath(); ctx.arc(cx,cy,cell*0.9,0,Math.PI*2); ctx.fill();
 
+    // Robot drawn as colored rounded square with ID label (matching reference video)
+    const sz = cell * 0.38;
+    const rad = sz * 0.25;
     ctx.fillStyle = col;
-    ctx.beginPath(); ctx.arc(cx,cy,cell*0.28,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle = '#0a0e13';
-    ctx.font = `${Math.floor(cell*0.28)}px 'JetBrains Mono'`;
+    ctx.beginPath();
+    ctx.moveTo(cx - sz + rad, cy - sz);
+    ctx.lineTo(cx + sz - rad, cy - sz);
+    ctx.quadraticCurveTo(cx + sz, cy - sz, cx + sz, cy - sz + rad);
+    ctx.lineTo(cx + sz, cy + sz - rad);
+    ctx.quadraticCurveTo(cx + sz, cy + sz, cx + sz - rad, cy + sz);
+    ctx.lineTo(cx - sz + rad, cy + sz);
+    ctx.quadraticCurveTo(cx - sz, cy + sz, cx - sz, cy + sz - rad);
+    ctx.lineTo(cx - sz, cy - sz + rad);
+    ctx.quadraticCurveTo(cx - sz, cy - sz, cx - sz + rad, cy - sz);
+    ctx.closePath();
+    ctx.fill();
+
+    // Robot ID label inside the square (white text)
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `bold ${Math.floor(cell*0.24)}px 'Space Grotesk', sans-serif`;
     ctx.textAlign = 'center'; ctx.textBaseline='middle';
-    ctx.fillText(id.replace(/[^0-9]/g,''), cx, cy+1);
+    ctx.fillText('A' + id.replace(/[^0-9]/g,''), cx, cy+1);
+
+    // Small direction arrow below if moving
+    if(rb.intent && rb.intent.length > 0) {
+      ctx.fillStyle = col;
+      ctx.font = `${Math.floor(cell*0.16)}px sans-serif`;
+      ctx.fillText('▾', cx, cy + sz + cell*0.12);
+    }
     i++;
   }
+
+  // Update status bar counters
+  const elM = document.getElementById('map-count-moving');
+  const elT = document.getElementById('map-count-turning');
+  const elW = document.getElementById('map-count-waiting');
+  if(elM) elM.textContent = movingCount;
+  if(elT) elT.textContent = turningCount;
+  if(elW) elW.textContent = waitingCount;
+
   requestAnimationFrame(draw);
 }
 

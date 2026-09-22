@@ -45,6 +45,7 @@ class PIBTAgentState:
     goal_since: int
     priority_base: int
     path: List[Cell]
+    is_nudged: bool = False
 
     @property
     def priority_key(self) -> Tuple[int, int, str]:
@@ -52,7 +53,7 @@ class PIBTAgentState:
         return (self.goal_since, self.priority_base, self.robot_id)
 
 
-def get_candidate_moves(agent: PIBTAgentState, wmap: WarehouseMap) -> List[Cell]:
+def get_candidate_moves(agent: PIBTAgentState, wmap: WarehouseMap, pusher_pos: Optional[Cell] = None) -> List[Cell]:
     """
     Returns candidate next cells for the agent, ordered from best to worst.
     Preferred move is path[1] (from A*), followed by other valid neighbors
@@ -65,15 +66,29 @@ def get_candidate_moves(agent: PIBTAgentState, wmap: WarehouseMap) -> List[Cell]
 
     valid_neighbors = [n for n in wmap.neighbours(curr) if not wmap.is_blocked(n)]
 
-    # Sort neighbors by distance to goal
     goal = agent.goal or curr
-    valid_neighbors.sort(key=lambda c: manhattan(c, goal))
+    aisle_cells = getattr(wmap, "aisle_cells", set())
+    if preferred is None and pusher_pos is not None:
+        # Pushed without a personal path: strongly prefer lateral/perpendicular steps
+        # to clear the pusher's lane of travel instead of staying in front of them.
+        p_dr, p_dc = curr[0] - pusher_pos[0], curr[1] - pusher_pos[1]
+        def lateral_score(c: Cell) -> Tuple[int, int, int]:
+            s_dr, s_dc = c[0] - curr[0], c[1] - curr[1]
+            is_lateral = 0 if (s_dr * p_dr + s_dc * p_dc == 0) else 1
+            in_aisle = 1 if c in aisle_cells else 0
+            return (is_lateral, in_aisle, manhattan(c, goal))
+        valid_neighbors.sort(key=lateral_score)
+    elif preferred is None:
+        valid_neighbors.sort(key=lambda c: (1 if c in aisle_cells else 0, manhattan(c, goal)))
+    else:
+        valid_neighbors.sort(key=lambda c: manhattan(c, goal))
 
     candidates: List[Cell] = []
     if preferred is None and (agent.goal is None or curr == agent.goal):
         # Idle or already at goal: stay put unless a higher-priority agent pushes us
-        # (a push reserves curr first, so the neighbours below are only tried then).
-        candidates.append(curr)
+        # or we have been nudged to make way.
+        if not getattr(agent, "is_nudged", False):
+            candidates.append(curr)
     if preferred and preferred in valid_neighbors:
         candidates.append(preferred)
         for n in valid_neighbors:
@@ -99,9 +114,9 @@ def run_pibt_step(agents: Dict[str, PIBTAgentState], wmap: WarehouseMap) -> Dict
     reserved_next: Dict[Cell, str] = {}
     next_pos: Dict[str, Cell] = {}
 
-    def pibt_func(agent: PIBTAgentState, forbidden_cells: Set[Cell], visited_chain: Set[str]) -> bool:
+    def pibt_func(agent: PIBTAgentState, forbidden_cells: Set[Cell], visited_chain: Set[str], pusher_pos: Optional[Cell] = None) -> bool:
         visited_chain.add(agent.robot_id)
-        candidates = get_candidate_moves(agent, wmap)
+        candidates = get_candidate_moves(agent, wmap, pusher_pos=pusher_pos)
 
         for cand in candidates:
             if cand in forbidden_cells:
@@ -132,7 +147,7 @@ def run_pibt_step(agents: Dict[str, PIBTAgentState], wmap: WarehouseMap) -> Dict
                 # Push blocker with inherited priority.
                 # Blocker cannot step into agent.pos (swap collision prevention).
                 sub_forbidden = set(forbidden_cells) | {agent.pos}
-                if pibt_func(blocker, sub_forbidden, visited_chain):
+                if pibt_func(blocker, sub_forbidden, visited_chain, pusher_pos=agent.pos):
                     return True
                 else:
                     # Push failed: backtrack

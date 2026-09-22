@@ -219,6 +219,7 @@ class PeerIntent:
     # Optional L3/L4 coordination fields (absent from older / baseline senders):
     goal: Optional[Cell] = None
     rank: Optional[tuple] = None   # PIBT priority key as broadcast; lower = higher priority
+    state: Optional[str] = None    # "IDLE", "EN_ROUTE_TO_PICKUP", "EN_ROUTE_TO_DROPOFF", etc.
 
 
 class ReservationBook:
