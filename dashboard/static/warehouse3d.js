@@ -157,9 +157,7 @@ function floorTexture(wm) {
       for (let d = -s; d < s * 2; d += 14) { g.beginPath(); g.moveTo(x + d, y); g.lineTo(x + d - s, y + s); g.stroke(); }
       g.restore();
       g.strokeStyle = color; g.lineWidth = 4; g.strokeRect(x, y, s, s);
-      g.fillStyle = color; g.beginPath(); g.roundRect(x + s / 2 - 17, y + s / 2 - 13, 34, 26, 5); g.fill();
-      g.fillStyle = '#fff'; g.font = 'bold 17px sans-serif'; g.textAlign = 'center';
-      g.fillText(label + (i + 1), x + s / 2, y + s / 2 + 6);
+      // Removed the central pill and P1/D1 text labels per user request
     });
     zone(wm.pickup, '#3d9cff', 'P');
     zone(wm.dropoff, '#ff5fc8', 'D');
