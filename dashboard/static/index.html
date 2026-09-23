@@ -651,7 +651,8 @@ function renderAuctions() {
 }
 
 function connect(){
-  const ws = new WebSocket(`ws://${location.host}/ws`);
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${protocol}//${location.host}/ws`);
   ws.onopen = ()=> document.getElementById('conn').textContent = 'mesh online';
   ws.onclose = ()=> { document.getElementById('conn').textContent = 'disconnected — retrying'; setTimeout(connect, 1500); };
   ws.onmessage = (ev)=>{

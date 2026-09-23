@@ -275,12 +275,18 @@ async def startup():
 
 
 if __name__ == "__main__":
+    import os
     import uvicorn
+    default_port = int(os.environ.get("PORT", os.environ.get("WEB_PORT", 8000)))
+    default_host = os.environ.get("HOST", "0.0.0.0")
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--observer-port", type=int, default=9600)
-    ap.add_argument("--web-port", type=int, default=8000)
+    ap.add_argument("--web-host", default=default_host)
+    ap.add_argument("--web-port", type=int, default=default_port)
     args = ap.parse_args()
 
     t = threading.Thread(target=udp_listener, args=(args.observer_port,), daemon=True)
     t.start()
-    uvicorn.run(app, host="127.0.0.1", port=args.web_port)
+    print(f"Starting server on {args.web_host}:{args.web_port}")
+    uvicorn.run(app, host=args.web_host, port=args.web_port)

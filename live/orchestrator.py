@@ -13,20 +13,24 @@ Then open http://127.0.0.1:8000 in a browser.
 Ctrl+C stops everything.
 """
 import argparse
+import os
 import subprocess
 import sys
 import time
 
 OBSERVER_PORT = 9600
-WEB_PORT = 8000
+DEFAULT_WEB_PORT = int(os.environ.get("PORT", os.environ.get("WEB_PORT", 8000)))
+DEFAULT_WEB_HOST = os.environ.get("HOST", "0.0.0.0")
 
 START_POSITIONS = [(9, 2), (9, 5), (9, 8), (9, 11), (0, 2), (0, 8)]
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--robots", type=int, default=3)
+    ap.add_argument("--robots", type=int, default=int(os.environ.get("ROBOTS", 3)))
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--web-host", default=DEFAULT_WEB_HOST)
+    ap.add_argument("--web-port", type=int, default=DEFAULT_WEB_PORT)
     args = ap.parse_args()
 
     n = args.robots
@@ -35,10 +39,11 @@ def main():
 
     dash = subprocess.Popen([sys.executable, "-m", "dashboard.server",
                               "--observer-port", str(OBSERVER_PORT),
-                              "--web-port", str(WEB_PORT)])
+                              "--web-host", args.web_host,
+                              "--web-port", str(args.web_port)])
     procs.append(dash)
     time.sleep(1.0)
-    print(f"Dashboard: http://127.0.0.1:{WEB_PORT}")
+    print(f"Dashboard: http://{args.web_host}:{args.web_port}")
 
     for i in range(n):
         pos = START_POSITIONS[i % len(START_POSITIONS)]
