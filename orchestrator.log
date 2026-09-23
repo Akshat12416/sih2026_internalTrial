@@ -1,0 +1,75 @@
+/Users/akshat12/Documents/SIH2026/claudeProject_trial/dashboard/server.py:271: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+Exception in thread Thread-1 (udp_listener):
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/threading.py", line 1043, in _bootstrap_inner
+    self.run()
+    ~~~~~~~~^^
+  File "/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/threading.py", line 994, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/akshat12/Documents/SIH2026/claudeProject_trial/dashboard/server.py", line 67, in udp_listener
+    sock.bind(("127.0.0.1", port))
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+OSError: [Errno 48] Address already in use
+INFO:     Started server process [56848]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+ERROR:    [Errno 48] error while attempting to bind on address ('127.0.0.1', 8000): [errno 48] address already in use
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+Traceback (most recent call last):
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/akshat12/Documents/SIH2026/claudeProject_trial/live/robot_process.py", line 106, in <module>
+    main()
+    ~~~~^^
+  File "/Users/akshat12/Documents/SIH2026/claudeProject_trial/live/robot_process.py", line 52, in main
+    link = UDPPeerLink(args.id, args.index, peer_indices, on_message)
+  File "/Users/akshat12/Documents/SIH2026/claudeProject_trial/network/peer_link.py", line 34, in __init__
+    self._sock.bind((host, self.my_port))
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+OSError: [Errno 48] Address already in use
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/akshat12/Documents/SIH2026/claudeProject_trial/live/robot_process.py", line 106, in <module>
+    main()
+    ~~~~^^
+  File "/Users/akshat12/Documents/SIH2026/claudeProject_trial/live/robot_process.py", line 52, in main
+    link = UDPPeerLink(args.id, args.index, peer_indices, on_message)
+  File "/Users/akshat12/Documents/SIH2026/claudeProject_trial/network/peer_link.py", line 34, in __init__
+    self._sock.bind((host, self.my_port))
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+OSError: [Errno 48] Address already in use
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/akshat12/Documents/SIH2026/claudeProject_trial/live/robot_process.py", line 106, in <module>
+    main()
+    ~~~~^^
+  File "/Users/akshat12/Documents/SIH2026/claudeProject_trial/live/robot_process.py", line 52, in main
+    link = UDPPeerLink(args.id, args.index, peer_indices, on_message)
+  File "/Users/akshat12/Documents/SIH2026/claudeProject_trial/network/peer_link.py", line 34, in __init__
+    self._sock.bind((host, self.my_port))
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+OSError: [Errno 48] Address already in use
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/akshat12/Documents/SIH2026/claudeProject_trial/live/robot_process.py", line 106, in <module>
+    main()
+    ~~~~^^
+  File "/Users/akshat12/Documents/SIH2026/claudeProject_trial/live/robot_process.py", line 52, in main
+    link = UDPPeerLink(args.id, args.index, peer_indices, on_message)
+  File "/Users/akshat12/Documents/SIH2026/claudeProject_trial/network/peer_link.py", line 34, in __init__
+    self._sock.bind((host, self.my_port))
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+OSError: [Errno 48] Address already in use
+Dashboard: http://127.0.0.1:8000
+Launched 4 independent robot processes (PIDs: [56853, 56854, 56855, 56856]). Press Ctrl+C to stop the fleet.

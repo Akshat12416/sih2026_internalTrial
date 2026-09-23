@@ -290,23 +290,36 @@ class RobotAgent:
         return self.wmap.grid[r][c] in (PICKUP, DROPOFF, CHARGE)
 
     def _nearest_staging_cell(self) -> Optional[Cell]:
-        """BFS out from the current position for the closest plain free
-        cell. An idle robot must not permanently camp on a pickup/dropoff/
-        charging cell -- that's a shared physical resource other robots
-        need, exactly like a loading bay in a real warehouse."""
+        """Finds the closest non-resource (FREE) cell using BFS. Used to move out of the way."""
         seen = {self.pos}
         q = deque([self.pos])
         occupied_cells = {intent.path[0] for intent in self.book.peers.values() if intent.path}
         
+        peer_paths = set()
+        for intent in self.book.peers.values():
+            if intent.path and not all(c == intent.path[0] for c in intent.path):
+                peer_paths.update(intent.path)
+                
+        candidates = []
         while q:
             cur = q.popleft()
             r, c = cur
             if cur != self.pos and self.wmap.grid[r][c] == FREE and cur not in occupied_cells:
-                return cur
-            for n in self.wmap.neighbours(cur):
-                if n not in seen:
-                    seen.add(n)
-                    q.append(n)
+                if cur not in peer_paths:
+                    return cur
+                else:
+                    candidates.append(cur)
+            
+            # DO NOT search through physically occupied cells
+            # This prevents finding staging cells on the other side of the robot nudging us!
+            if cur == self.pos or cur not in occupied_cells:
+                for n in self.wmap.neighbours(cur):
+                    if n not in seen:
+                        seen.add(n)
+                        q.append(n)
+        
+        if candidates:
+            return candidates[0]
         return None
 
     def _nudge_cost(self, target_cell: Cell) -> int:
@@ -315,18 +328,30 @@ class RobotAgent:
         q = deque([target_cell])
         occupied_cells = {intent.path[0] for intent in self.book.peers.values() if intent.path}
         
+        peer_paths = set()
+        for intent in self.book.peers.values():
+            if intent.path and not all(c == intent.path[0] for c in intent.path):
+                peer_paths.update(intent.path)
+                
+        fallback_cost = None
         while q:
             cur = q.popleft()
             r, c = cur
             if cur != target_cell and self.wmap.grid[r][c] == FREE and cur not in occupied_cells:
                 dist = manhattan(target_cell, cur)
-                # 2x distance (out and back) + small overhead for wake/turn delays
-                return (dist * 2) + 2
-            for n in self.wmap.neighbours(cur):
-                if n not in seen:
-                    seen.add(n)
-                    q.append(n)
-        return 15  # Fallback if no staging cell is found
+                cost = (dist * 2) + 2
+                if cur not in peer_paths:
+                    return cost
+                elif fallback_cost is None:
+                    fallback_cost = cost
+            
+            if cur == target_cell or cur not in occupied_cells:
+                for n in self.wmap.neighbours(cur):
+                    if n not in seen:
+                        seen.add(n)
+                        q.append(n)
+                    
+        return fallback_cost if fallback_cost is not None else 15
 
 
     def _replan(self):
@@ -345,8 +370,15 @@ class RobotAgent:
                 if expiry > self.t:
                     for dt in range(400):
                         reserved.setdefault((cell, self.t + dt), self.robot_id + "#avoid")
+        nudge_costs = {}
+        if self.cooperative:
+            for peer_id, intent in self.book.peers.items():
+                if intent.path and all(c == intent.path[0] for c in intent.path):
+                    cost = self._nudge_cost(intent.path[0])
+                    nudge_costs[intent.path[0]] = cost
+
         self.path = astar(self.wmap, self.pos, goal, reserved,
-                            start_t=self.t, self_id=self.robot_id)
+                            start_t=self.t, self_id=self.robot_id, nudge_costs=nudge_costs)
         
         # If we couldn't find a path to our goal (e.g. because the goal itself 
         # is blacklisted or blocked), we should temporarily retreat to a staging cell!
@@ -354,7 +386,7 @@ class RobotAgent:
             target = self._nearest_staging_cell()
             if target:
                 self.path = astar(self.wmap, self.pos, target, reserved,
-                                  start_t=self.t, self_id=self.robot_id)
+                                  start_t=self.t, self_id=self.robot_id, nudge_costs=nudge_costs)
                 if self.path:
                     self.display_status = "RECALCULATING"
 
@@ -368,7 +400,11 @@ class RobotAgent:
         self.t += 1
         self.book.prune(now=time.time())
         if self.avoid_until:
-            self.avoid_until = {c: exp for c, exp in self.avoid_until.items() if exp > self.t}
+            occupied_now = {intent.path[0] for intent in self.book.peers.values() if intent.path}
+            self.avoid_until = {
+                c: exp for c, exp in self.avoid_until.items() 
+                if exp > self.t and (c in occupied_now or self.wmap.is_blocked(c, now=self.t))
+            }
 
         # -- battery management --------------------------------------
         if self.battery <= LOW_BATTERY and self.state not in (
@@ -467,11 +503,25 @@ class RobotAgent:
                         "start_t": self.t})
             return
 
-        # -- (re)plan if we have no path --------------------------------
+        # -- (re)plan if we have no path, or opportunistically ----------------
         just_planned = False
         if not self.path or len(self.path) < 2:
             self._replan()
             just_planned = True
+        elif self.cooperative and self.t % 2 == 0 and self.wait_ticks == 0:
+            # We are moving smoothly, but we might be on a suboptimal detour.
+            # See if a strictly shorter path has opened up.
+            old_path = self.path
+            self._replan()
+            if not self.path or len(self.path) >= len(old_path):
+                # The new path isn't better (or we failed to find one), keep the old one.
+                if self.robot_id == "R3":
+                    print(f"[DEBUG R3] t={self.t} Opportunistic replan failed or not better. Old len: {len(old_path)}, New len: {len(self.path) if self.path else 0}")
+                self.path = old_path
+            else:
+                if self.robot_id == "R3":
+                    print(f"[DEBUG R3] t={self.t} ADOPTED NEW PATH! Old len: {len(old_path)}, New len: {len(self.path)}")
+                just_planned = True
 
         if not self.path or len(self.path) < 2:
             # boxed in -- broadcast that we're stationary and try again next tick

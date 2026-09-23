@@ -115,13 +115,15 @@ def manhattan(a: Cell, b: Cell) -> int:
 
 def astar(wmap: WarehouseMap, start: Cell, goal: Cell,
           reserved: Optional[Dict[Tuple[Cell, int], str]] = None,
-          start_t: int = 0, self_id: str = "") -> List[Cell]:
+          start_t: int = 0, self_id: str = "",
+          nudge_costs: Optional[Dict[Cell, int]] = None) -> List[Cell]:
     """Grid A*. If `reserved` is supplied (a dict of (cell, time_step) ->
     robot_id) the search also avoids stepping into a cell at a timestep
     another (higher-or-equal priority) robot has claimed -- this is the
     'cooperative A*' trick that lets many independent planners avoid each
     other without ever synchronizing on a single global plan."""
     reserved = reserved or {}
+    nudge_costs = nudge_costs or {}
     open_heap = [(manhattan(start, goal), 0, start, start_t)]
     came_from: Dict[Tuple[Cell, int], Tuple[Cell, int]] = {}
     g_score = {(start, start_t): 0}
@@ -137,11 +139,17 @@ def astar(wmap: WarehouseMap, start: Cell, goal: Cell,
             return _reconstruct(came_from, (cur, t))
 
         for nxt in wmap.neighbours(cur) + [cur]:  # "+ [cur]" = allow waiting in place
-            nt = t + 1
+            if nxt != cur and nxt in nudge_costs:
+                # If we step into a stationary robot, we incur the nudge cost (it takes time for them to move)
+                cost = 1 + nudge_costs[nxt]
+            else:
+                cost = 1
+                
+            nt = t + cost
             key = (nxt, nt)
             if key in reserved and reserved[key] != self_id:
                 continue  # someone else claims that cell at that time
-            ng = g + 1
+            ng = g + cost
             if g_score.get(key, 1e9) > ng:
                 g_score[key] = ng
                 came_from[key] = (cur, t)
@@ -155,8 +163,15 @@ def astar(wmap: WarehouseMap, start: Cell, goal: Cell,
 def _reconstruct(came_from, key) -> List[Cell]:
     path = [key[0]]
     while key in came_from:
-        key = came_from[key]
-        path.append(key[0])
+        prev_key = came_from[key]
+        dt = key[1] - prev_key[1]
+        # If A* calculated a time jump (e.g. waiting for a nudge or waiting in place),
+        # pad the physical path array with copies of the previous cell so the 
+        # reservation book accurately reflects the robot sitting still during that delay.
+        for _ in range(dt - 1):
+            path.append(prev_key[0])
+        path.append(prev_key[0])
+        key = prev_key
     path.reverse()
     return path
 
