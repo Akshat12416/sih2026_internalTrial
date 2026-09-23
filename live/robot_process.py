@@ -79,12 +79,6 @@ def main():
                 agent.announce_task(t)
                 next_task_at = tick + random.randint(6, 14)
 
-            # random dynamic blockage injection, to test re-routing (rare)
-            if random.random() < 0.003:
-                cell = random.choice(wmap.pickup_points + wmap.dropoff_points)
-                wmap.report_blockage(cell, duration_s=15)
-                link.broadcast({"type": "blockage", "robot_id": args.id,
-                                  "cell": cell, "duration": 15})
 
             agent.bid_on_open_tasks()
             agent.settle_auctions()

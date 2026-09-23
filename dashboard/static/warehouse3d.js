@@ -553,6 +553,29 @@ function updateFollow(dt) {
   }
 }
 
+// ---------------------------------------------------------------- dynamic blockages (YOLO)
+const blockagesGroup = new THREE.Group();
+scene.add(blockagesGroup);
+let blockagesKey = '';
+function syncBlockages(time) {
+  const evs = (window.dash?.events || []).filter(e => e.kind === 'blockage');
+  const key = JSON.stringify(evs);
+  if (key !== blockagesKey) {
+    blockagesKey = key;
+    blockagesGroup.children.forEach(o => { if (o.material) o.material.dispose(); if (o.geometry) o.geometry.dispose(); });
+    blockagesGroup.clear();
+    evs.forEach(ev => {
+      // red box
+      const m = new THREE.Mesh(
+          new THREE.BoxGeometry(S * 0.7, S * 0.7, S * 0.7),
+          new THREE.MeshLambertMaterial({ color: 0xff3c3c, transparent: true, opacity: 0.6 })
+      );
+      m.position.copy(cellPos(ev.cell[0], ev.cell[1], S * 0.35));
+      blockagesGroup.add(m);
+    });
+  }
+}
+
 // ---------------------------------------------------------------- boot
 const wm = await (await fetch('/warehouse')).json();
 buildWorld(wm);
@@ -563,6 +586,7 @@ renderer.setAnimationLoop(() => {
   if (!host.offsetParent) return; // tab hidden: skip rendering
   syncRobots(dt, time);
   syncPending(time);
+  syncBlockages(time);
   updateFollow(dt);
   controls.update();
   composer.render();

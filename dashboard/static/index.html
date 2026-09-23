@@ -227,6 +227,9 @@
             <button id="btn-auto" style="padding:8px 0; background:var(--panel-2); color:var(--text); border:1px solid var(--line); border-radius:4px; font-family:inherit; cursor:pointer; font-size:11px; white-space:nowrap;">Auto: OFF</button>
             <button id="btn-reset" style="padding:8px 0; background:var(--danger); color:var(--bg); border:none; border-radius:4px; font-family:inherit; font-weight:bold; cursor:pointer; font-size:11px; white-space:nowrap;">Reset Fleet</button>
         </div>
+        <div style="display:grid; grid-template-columns: 1fr; gap:10px; margin-top:10px;">
+            <button id="btn-obstacle" style="padding:8px 0; background:var(--warn); color:var(--bg); border:none; border-radius:4px; font-family:inherit; font-weight:bold; cursor:pointer; font-size:11px; white-space:nowrap;">Add Obstacle</button>
+        </div>
       </div>
       <div class="aside-head">Live Fleet Telemetry</div>
       <div class="fleet-list" id="fleet"></div>
@@ -306,6 +309,26 @@ function colorFor(id){ return robotColors[(parseInt(id.replace(/\D/g, '')) - 1) 
 
 function draw(){
   drawStatic();
+  
+  // draw dynamic blockages
+  if (typeof wmap_events !== 'undefined') {
+      wmap_events.forEach(ev => {
+          if (ev.kind === 'blockage') {
+              const [r, c] = ev.cell;
+              const [cx, cy] = cellCenter(r, c);
+              const sz = cell * 0.7;
+              ctx.fillStyle = `rgba(255, 60, 60, 0.4)`;
+              ctx.fillRect(cx - sz/2, cy - sz/2, sz, sz);
+              ctx.strokeStyle = '#ff3c3c';
+              ctx.lineWidth = 2;
+              ctx.beginPath();
+              ctx.moveTo(cx - sz/4, cy - sz/4); ctx.lineTo(cx + sz/4, cy + sz/4);
+              ctx.moveTo(cx + sz/4, cy - sz/4); ctx.lineTo(cx - sz/4, cy + sz/4);
+              ctx.stroke();
+          }
+      });
+  }
+
   // draw queued tasks
   ctx.lineWidth = 2;
   ctx.setLineDash([4, 4]);
@@ -634,6 +657,7 @@ function connect(){
   ws.onmessage = (ev)=>{
     const data = JSON.parse(ev.data);
     if(data.robots) renderFleet(data.robots);
+    if(data.events) wmap_events = data.events;
     
     if(data.network_events) {
       let updated = false;
@@ -676,6 +700,7 @@ loadWarehouse().then(()=>{ draw(); connect(); });
 
 let autoTasks = false;
 let taskQueue = [];
+let wmap_events = [];
 let clickState = 'SELECT_PICKUP';
 let currentPickup = null;
 
@@ -692,6 +717,17 @@ canvas.addEventListener('click', (e) => {
 function cellClick(r, c) {
     if(r < 0 || r >= wmap.grid.length || c < 0 || c >= wmap.grid[0].length) return;
     if(wmap.grid[r][c] === 1) return; // skip shelves
+
+    if (clickState === 'ADD_OBSTACLE') {
+        fetch('/api/add-obstacle', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({cell: [r, c]})
+        });
+        clickState = 'SELECT_PICKUP';
+        updateQueueUI();
+        return;
+    }
 
     if(clickState === 'SELECT_PICKUP') {
         currentPickup = [r, c];
@@ -711,6 +747,7 @@ window.dash = {
     get robots() { return robots; },
     get taskQueue() { return taskQueue; },
     get currentPickup() { return currentPickup; },
+    get events() { return wmap_events; }
 };
 
 function updateQueueUI() {
@@ -739,6 +776,11 @@ document.getElementById('btn-reset').onclick = async () => {
     document.getElementById('event-log').innerHTML = '';
     document.getElementById('net-log').innerHTML = '';
     await fetch('/api/reset', { method: 'POST' });
+};
+
+document.getElementById('btn-obstacle').onclick = () => {
+    clickState = 'ADD_OBSTACLE';
+    document.getElementById('queue-status').textContent = `Click map to mark obstacle`;
 };
 
 document.getElementById('btn-batch').onclick = async () => {

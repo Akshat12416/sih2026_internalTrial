@@ -116,17 +116,36 @@ class BenchmarkRequest(BaseModel):
     robots: int
     tasks: int
 
+class TaskRequest(BaseModel):
+    pickup: list[int]
+    dropoff: list[int]
+
+class TaskBatchRequest(BaseModel):
+    tasks: list[dict]
+
 class AutoTaskRequest(BaseModel):
     active: bool
 
 auto_tasks_active = False
 
-class TaskRequest(BaseModel):
-    pickup: list = None
-    dropoff: list = None
+class ObstacleRequest(BaseModel):
+    cell: list[int]
 
-class TaskBatchRequest(BaseModel):
-    tasks: list[dict]
+@app.post("/api/add-obstacle")
+async def add_obstacle(req: ObstacleRequest):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    payload = json.dumps({"type": "blockage", "cell": req.cell, "duration": 9999.0}).encode("utf-8")
+    for port in range(9500, 9520):
+        try:
+            sock.sendto(payload, ("127.0.0.1", port))
+        except OSError:
+            pass
+    # ensure dashboard gets it too
+    fleet_state.setdefault("_events", []).append(
+        {"kind": "blockage", "cell": req.cell, "t": time.time()}
+    )
+    sock.close()
+    return {"status": "ok"}
 
 @app.post("/api/spawn-batch")
 async def spawn_batch(req: TaskBatchRequest):
