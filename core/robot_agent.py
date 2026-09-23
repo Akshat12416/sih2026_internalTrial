@@ -458,10 +458,11 @@ class RobotAgent:
             # resource would have nowhere to physically go.
             if self._on_resource_cell() or self.nudged or (self.path and len(self.path) >= 2):
                 if self.nudged:
-                    self.avoid_until[self.pos] = self.t + 10
-                    self.path = []
                     self.nudged = False
-                    self.display_status = "MAKING WAY"
+                    if self.display_status != "MAKING WAY":
+                        self.avoid_until[self.pos] = self.t + 10
+                        self.path = []
+                        self.display_status = "MAKING WAY"
                     
                 just_planned_idle = False
                 if not self.path or len(self.path) < 2:
@@ -508,7 +509,7 @@ class RobotAgent:
         if not self.path or len(self.path) < 2:
             self._replan()
             just_planned = True
-        elif self.cooperative and self.t % 2 == 0 and self.wait_ticks == 0:
+        elif self.cooperative and self.t % 7 == 0 and self.wait_ticks == 0:
             # We are moving smoothly, but we might be on a suboptimal detour.
             # See if a strictly shorter path has opened up.
             old_path = self.path
